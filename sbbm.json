@@ -1,0 +1,14 @@
+{
+    "pre-link-args": [],
+
+    "_comment": "Someday, more ideal:",
+    "_data-layout": "e-S32-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:32:64-a0:0:32-s0:32:32",
+
+    "data-layout": "e-S32-p:32:32:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-i64:32:32-a0:0:32-s0:32:32",
+    "llvm-target": "sbbm",
+    "target-endian": "little",
+    "target-pointer-width": "32",
+    "arch": "arm",
+    "os": "unknown",
+    "morestack": false
+}

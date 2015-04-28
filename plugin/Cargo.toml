@@ -1,8 +1,8 @@
 [package]
-name = "sbbm"
+name = "sbbm_plugin"
 version = "0.0.1"
 authors = ["Christopher Chambers <chris.chambers@peanutcode.com>"]
-build = "build.rs"
 
-[dependencies.sbbm_plugin]
-path = "plugin"
+[lib]
+name = "sbbm_plugin"
+plugin = true
