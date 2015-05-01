@@ -7,6 +7,7 @@ use std::mem;
 
 pub trait LayoutMotion {
     fn advance(&mut self);
+    fn punctuate(&mut self);
     fn terminate(&mut self);
     fn pos(&self) -> Vec3;
     fn power_pos(&self) -> Vec3;
@@ -31,6 +32,10 @@ impl LayoutMotion for LinearMotion {
         self.pos.z += 1;
     }
 
+    fn punctuate(&mut self) {
+        // do nothing.
+    }
+
     fn terminate(&mut self) {
         self.pos.x += 2;
         self.pos.z = self.start.z;
@@ -44,6 +49,77 @@ impl LayoutMotion for LinearMotion {
         let mut pos = self.pos;
         pos.y -= 1;
         pos
+    }
+}
+
+pub struct PackedMotion {
+    start: Vec3,
+    pos: Vec3,
+    dir: u8,
+    level: u8,
+}
+
+impl PackedMotion {
+    pub fn new(start: Vec3) -> PackedMotion {
+        PackedMotion {
+            start: start,
+            pos: start,
+            dir: 0,
+            level: 0,
+        }
+    }
+}
+
+impl LayoutMotion for PackedMotion {
+    fn advance(&mut self) {
+        if self.dir == 3 {
+            self.pos.z += 1;
+        }
+        self.dir += 1;
+        self.dir %= 4;
+    }
+
+    fn punctuate(&mut self) {
+        if self.dir != 0 {
+            self.pos.z += 1;
+            self.dir = 0;
+        }
+    }
+
+    fn terminate(&mut self) {
+        // TODO: A very tight packing is possible, but it's not important now.
+        //       In order to really fill a 3d space, a bin-packing component
+        //       will probably be needed.  It will take a little bit of thought
+        //       to pack plus-shaped bins.
+        if self.pos.z - self.start.z <= 14 {
+            self.punctuate();
+        } else {
+            self.pos.x += 2;
+            self.level = (self.level + 1) % 2;
+            if self.level == 0 {
+                self.pos.y -= 1;
+            } else {
+                self.pos.y += 1;
+            }
+            self.pos.z = self.start.z;
+            self.dir = 0;
+        }
+    }
+
+    fn pos(&self) -> Vec3 {
+        let mut pos = self.pos;
+        match self.dir {
+            0 => { pos.x -= 1 }
+            1 => { pos.x += 1 }
+            2 => { pos.y -= 1 }
+            3 => { pos.y += 1 }
+            _ => { unreachable!() }
+        }
+        pos
+    }
+
+    fn power_pos(&self) -> Vec3 {
+        self.pos
     }
 }
 
@@ -93,6 +169,7 @@ impl<Motion, Source> Layout<Motion, Source>
     }
 
     fn add_label(&mut self, label: String) {
+        self.motion.punctuate();
         let pos = self.motion.power_pos();
         let extent = Extent::MinMax(pos, pos);
         self.active_extents.insert(label, extent);

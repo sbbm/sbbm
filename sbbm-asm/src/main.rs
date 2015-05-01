@@ -17,7 +17,7 @@ mod parser;
 use assembler::Assembler;
 use core::Vec3;
 use docopt::Docopt;
-use layout::{Layout, LinearMotion};
+use layout::{Layout, PackedMotion};
 use lexer::Lexer;
 use nbt::Nbt;
 use parser::Parser;
@@ -51,13 +51,14 @@ fn main() {
 
         // FIXME: Check for warnings/errors before starting to place blocks.
         let assembler = Assembler::new(stmts.into_iter());
-        let motion = LinearMotion::new(Vec3::new(27, 57, 0));
+        //let motion = LinearMotion::new(Vec3::new(27, 57, 0));
+        let motion = PackedMotion::new(Vec3::new(27, 57, 0));
         let layout = Layout::new(motion, assembler);
 
         let mut conn = Connection::connect(
             &args.arg_server[..], &args.arg_password[..]).unwrap();
 
-        conn.cmd("fill 27 56 0 80 60 64 minecraft:air").unwrap();
+        conn.cmd("fill 26 56 0 60 67 32 minecraft:air").unwrap();
         for (pos, block) in layout {
             let cmd = format!(
                 "setblock {} {} {} {} 0 replace {}",
