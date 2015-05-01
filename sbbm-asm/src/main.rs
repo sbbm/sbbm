@@ -17,7 +17,7 @@ mod parser;
 use assembler::Assembler;
 use core::Vec3;
 use docopt::Docopt;
-use layout::LinearLayout;
+use layout::{Layout, LinearMotion};
 use lexer::Lexer;
 use nbt::Nbt;
 use parser::Parser;
@@ -51,7 +51,8 @@ fn main() {
 
         // FIXME: Check for warnings/errors before starting to place blocks.
         let assembler = Assembler::new(stmts.into_iter());
-        let layout = LinearLayout::new(Vec3::new(27, 57, 0), assembler);
+        let motion = LinearMotion::new(Vec3::new(27, 57, 0));
+        let layout = Layout::new(motion, assembler);
 
         let mut conn = Connection::connect(
             &args.arg_server[..], &args.arg_password[..]).unwrap();

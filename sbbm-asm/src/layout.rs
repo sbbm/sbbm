@@ -5,24 +5,68 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem;
 
-pub struct LinearLayout<Source : Iterator<Item=AssembledItem>> {
+pub trait LayoutMotion {
+    fn advance(&mut self);
+    fn terminate(&mut self);
+    fn pos(&self) -> Vec3;
+    fn power_pos(&self) -> Vec3;
+}
+
+pub struct LinearMotion {
+    start: Vec3,
+    pos: Vec3,
+}
+
+impl LinearMotion {
+    pub fn new(start: Vec3) -> LinearMotion {
+        LinearMotion {
+            start: start,
+            pos: start,
+        }
+    }
+}
+
+impl LayoutMotion for LinearMotion {
+    fn advance(&mut self) {
+        self.pos.z += 1;
+    }
+
+    fn terminate(&mut self) {
+        self.pos.x += 2;
+        self.pos.z = self.start.z;
+    }
+
+    fn pos(&self) -> Vec3 {
+        self.pos
+    }
+
+    fn power_pos(&self) -> Vec3 {
+        let mut pos = self.pos;
+        pos.y -= 1;
+        pos
+    }
+}
+
+pub struct Layout<Motion, Source>
+    where Motion : LayoutMotion,
+          Source : Iterator<Item=AssembledItem> {
     input: Source,
     input_done: bool,
-    start_pos: Vec3,
-    pos: Vec3,
+    motion: Motion,
     buffer: VecDeque<(Vec3, Block)>,
     complete_extents: HashMap<String, Extent>,
-    active_extents: HashMap<String, Vec3>,
+    active_extents: HashMap<String, Extent>,
     pending: Vec<(String, Vec3, PendingFn)>,
 }
 
-impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
-    pub fn new(start_pos: Vec3, input: Source) -> LinearLayout<Source> {
-        LinearLayout {
+impl<Motion, Source> Layout<Motion, Source>
+    where Motion : LayoutMotion,
+          Source : Iterator<Item=AssembledItem> {
+    pub fn new(motion: Motion, input: Source) -> Layout<Motion, Source> {
+        Layout {
             input: input,
             input_done: false,
-            start_pos: start_pos,
-            pos: start_pos,
+            motion: motion,
             buffer: VecDeque::new(),
             complete_extents: HashMap::new(),
             active_extents: HashMap::new(),
@@ -30,32 +74,37 @@ impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
         }
     }
 
-    fn advance(&mut self) {
-        self.pos.z += 1;
+    fn update_active_extents(&mut self) {
+        let power_pos = self.motion.power_pos();
+        for (_, extent) in self.active_extents.iter_mut() {
+            extent.add(power_pos)
+        }
     }
 
     fn emit(&mut self, block: Block) {
-        let pos = self.pos;
-        self.emit_at(pos, block);
-        self.advance();
+        let pos = self.motion.pos();
+        self.emit_raw(pos, block);
+        self.update_active_extents();
+        self.motion.advance();
     }
 
-    fn emit_at(&mut self, pos: Vec3, block: Block) {
+    fn emit_raw(&mut self, pos: Vec3, block: Block) {
         self.buffer.push_back((pos, block));
     }
 
     fn add_label(&mut self, label: String) {
-        let mut pos = self.pos;
-        pos.y -= 1;
-        self.active_extents.insert(label, pos);
+        let pos = self.motion.power_pos();
+        let extent = Extent::MinMax(pos, pos);
+        self.active_extents.insert(label, extent);
     }
 
     fn add_pending(&mut self, label: String, func: PendingFn) {
         match self.resolve_extent(&label) {
             Some(extent) => { self.emit(func(extent)); }
             None => {
-                self.pending.push((label, self.pos, func));
-                self.advance();
+                self.pending.push((label, self.motion.pos(), func));
+                self.update_active_extents();
+                self.motion.advance();
             }
         }
     }
@@ -65,7 +114,7 @@ impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
             match self.resolve_extent(&self.pending[i].0) {
                 Some(extent) => {
                     let (_, pos, func) = self.pending.swap_remove(i);
-                    self.emit_at(pos, func(extent));
+                    self.emit_raw(pos, func(extent));
                 }
                 None => (),
             }
@@ -77,20 +126,16 @@ impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
     }
 
     fn new_line(&mut self) {
-        let mut extent_end_pos = self.pos;
-        extent_end_pos.y -= 1;
-        extent_end_pos.z -= 1;
         // FIXME: Use drain when it is no longer unstable.
         let mut active_extents = HashMap::new();
         mem::swap(&mut self.active_extents, &mut active_extents);
-        for (label, start) in active_extents.into_iter() {
-            self.complete_extents.insert(label, Extent::MinMax(start, extent_end_pos));
+        for (label, extent) in active_extents.into_iter() {
+            self.complete_extents.insert(label, extent);
         }
 
         self.resolve_pending();
 
-        self.pos.x += 1;
-        self.pos.z = self.start_pos.z;
+        self.motion.terminate();
     }
 
     fn layout_item(&mut self, item: AssembledItem) {
@@ -103,7 +148,9 @@ impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
     }
 }
 
-impl<Source : Iterator<Item=AssembledItem>> Iterator for LinearLayout<Source> {
+impl<Motion, Source> Iterator for Layout<Motion, Source>
+    where Motion : LayoutMotion,
+          Source : Iterator<Item=AssembledItem> {
     type Item = (Vec3, Block);
 
     fn next(&mut self) -> Option<(Vec3, Block)> {
