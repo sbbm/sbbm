@@ -6,6 +6,7 @@ use std::boxed::FnBox;
 use nbt::*;
 use std::collections::VecDeque;
 use std::fmt;
+use std::mem;
 use self::AssembledItem::*;
 
 pub type PendingFn = Box<FnBox(Extent) -> Block>;
@@ -38,6 +39,7 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     //uses_bitwise: bool,
     done: bool,
     unique: u32,
+    pending_labels: Vec<String>,
 }
 
 impl<S : Iterator<Item=Statement>> Assembler<S> {
@@ -54,30 +56,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             //uses_bitwise: false,
             done: false,
             unique: 0,
+            pending_labels: vec!(),
         }
     }
 
     fn assemble(&mut self, stmt: Statement) {
         match stmt {
-            LabelStmt(label) => {
-                self.emit(Label(label.clone()));
-                // FIXME: unify this code with the filling code in BrL.
-                // FIXME: prevent duplicate off-fillers.
-                let entity_name = self.entity_name.clone();
-                self.emit(Pending(label, Box::new(move |extent| {
-                    match extent {
-                        Extent::Empty => {
-                            panic!("oh no!");
-                        }
-                        Extent::MinMax(min, max) => {
-                            make_cmd_block(
-                                &entity_name[..], vec!(),
-                                format!("fill {} {} {} {} {} {} minecraft:stone",
-                                        min.x, min.y, min.z, max.x, max.y, max.z))
-                        }
-                    }
-                })));
-            }
+            LabelStmt(label) => { self.emit(Label(label)); }
             Instr(conds, op) => { self.assemble_instr(conds, op); }
         }
     }
@@ -227,23 +212,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 })));
 
                 self.emit(Terminal);
-                self.emit(Label(cont_label.clone()));
-
-                // FIXME: So much duplication.
-                let entity_name = self.entity_name.clone();
-                self.emit(Pending(cont_label, Box::new(move |extent| {
-                    match extent {
-                        Extent::Empty => {
-                            panic!("oh no!");
-                        }
-                        Extent::MinMax(min, max) => {
-                            make_cmd_block(
-                                &entity_name[..], vec!(),
-                                format!("fill {} {} {} {} {} {} minecraft:stone",
-                                        min.x, min.y, min.z, max.x, max.y, max.z))
-                        }
-                    }
-                })));
+                self.emit(Label(cont_label));
             }
             BrR(_) => {
                 let block = make_cmd_block(
@@ -260,13 +229,56 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     }
 
     fn emit(&mut self, item: AssembledItem) {
-        self.buffer.push_back(item);
+        match item {
+            Label(label) => {
+                // Queue labels so they can be processed all at once, so extra
+                // power-off blocks are elided.
+                self.pending_labels.push(label);
+            }
+            _ => {
+                // Flush pending labels
+                if !self.pending_labels.is_empty() {
+                    let first_label = self.pending_labels[0].clone();
+
+                    // FIXME: Use drain when it is no longer unstable.
+                    let mut labels = vec!();
+                    mem::swap(&mut labels, &mut self.pending_labels);
+                    for label in labels.into_iter() {
+                        self.buffer.push_back(Label(label));
+                    }
+
+                    let off_item = self.make_label_power_off_item(first_label);
+                    self.buffer.push_back(off_item);
+                }
+
+                self.buffer.push_back(item);
+            }
+        };
+
     }
 
     fn add_success_count(&self, block: &mut Block, reg: Register) {
         let stats = make_command_stats(self.selector.clone(), reg_name(reg));
         block.nbt.insert("CommandStats".to_string(), stats);
     }
+
+    fn make_label_power_off_item(&self, label: String) -> AssembledItem {
+        let entity_name = self.entity_name.clone();
+        Pending(label, Box::new(move |extent| {
+            match extent {
+                Extent::Empty => {
+                    panic!("oh no!");
+                }
+                Extent::MinMax(min, max) => {
+                    make_cmd_block(
+                        &entity_name[..], vec!(),
+                        format!("fill {} {} {} {} {} {} minecraft:stone",
+                                min.x, min.y, min.z, max.x, max.y, max.z))
+                }
+            }
+        }))
+    }
+
 }
 
 fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: String) -> Block {

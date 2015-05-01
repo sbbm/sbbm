@@ -89,7 +89,7 @@ impl<Source : Iterator<Item=AssembledItem>> LinearLayout<Source> {
 
         self.resolve_pending();
 
-        self.pos.x += 2;
+        self.pos.x += 1;
         self.pos.z = self.start_pos.z;
     }
 
