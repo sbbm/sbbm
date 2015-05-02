@@ -272,7 +272,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 Extent::MinMax(min, max) => {
                     make_cmd_block(
                         &entity_name[..], vec!(),
-                        format!("fill {} {} {} {} {} {} minecraft:stone",
+                        format!("fill {} {} {} {} {} {} minecraft:obsidian",
                                 min.x, min.y, min.z, max.x, max.y, max.z))
                 }
             }
