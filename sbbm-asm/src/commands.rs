@@ -1,0 +1,209 @@
+use core::Pos3;
+use nbt::Nbt;
+use std::fmt;
+
+pub type Selector = String;
+pub type Objective = String;
+pub type Team = String;
+pub type DisplaySlot = String;
+pub type BlockId = String;
+pub type BlockData = i32;
+
+pub enum Command {
+    Execute(Selector, Pos3, Box<Command>),
+    ExecuteDetect(Selector, Pos3, Pos3, BlockId, BlockData, Box<Command>),
+    // FIXME: Option<Nbt> should be Option<NbtCompound>
+    Fill(Pos3, Pos3, BlockId, Option<BlockData>, Option<FillAction>, Option<Nbt>),
+    FillReplace(Pos3, Pos3, BlockId, BlockData, Option<BlockId>, Option<BlockData>),
+    Say(String),
+    // FIXME: Option<Nbt> should be Option<NbtCompound>
+    SetBlock(Pos3, BlockId, Option<BlockData>, Option<SetBlockAction>, Option<Nbt>),
+    Scoreboard(ScoreboardCmd),
+    Raw(String),
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::Command::*;
+
+        match *self {
+            Execute(ref sel, ref pos, ref cmd) =>
+                write!(f, "execute {} {} {}", sel, pos, cmd),
+            Fill(
+                ref min, ref max, ref block_id, ref block_data, ref action,
+                ref data_tag) =>
+            {
+                try!(write!(f, "fill {} {} {}", min, max, block_id));
+                if let Some(ref block_data) = *block_data {
+                    try!(write!(f, " {}", block_data));
+                }
+                if let Some(ref action) = *action {
+                    try!(write!(f, " {}", action));
+                }
+                if let Some(ref data_tag) = *data_tag {
+                    try!(write!(f, " {}", data_tag));
+                }
+                Ok(())
+            }
+            Say(ref msg) => write!(f, "say {}", msg),
+            Scoreboard(ref cmd) => write!(f, "scoreboard {}", cmd),
+            Raw(ref raw) => write!(f, "{}", raw),
+            _ => unimplemented!()
+        }
+    }
+}
+
+pub enum SetBlockAction {
+    Destroy,
+    Keep,
+    Replace,
+}
+
+pub enum FillAction {
+    Destroy,
+    Hollow,
+    Keep,
+    Outline,
+    Replace,
+}
+
+impl fmt::Display for FillAction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        unimplemented!();
+    }
+}
+
+pub enum ScoreboardCmd {
+    Objectives(ObjCmd),
+    Players(PlayerCmd),
+    Teams(TeamCmd),
+}
+
+impl fmt::Display for ScoreboardCmd {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::ScoreboardCmd::*;
+
+        match *self {
+            Objectives(ref cmd) => write!(f, "objectives {}", cmd),
+            Players(ref cmd) => write!(f, "players {}", cmd),
+            Teams(ref cmd) => write!(f, "teams {}", cmd),
+        }
+    }
+}
+
+pub enum ObjCmd {
+    List,
+    Add(Objective, String, Option<String>),
+    Remove(Objective),
+    SetDisplay(DisplaySlot, Option<Objective>),
+}
+
+impl fmt::Display for ObjCmd {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::ObjCmd::*;
+
+        match *self {
+            List => write!(f, "list"),
+            Add(ref obj, ref criteria, ref disp) => {
+                try!(write!(f, "add {} {}", obj, criteria));
+                if let Some(ref disp) = *disp {
+                    write!(f, " {}", disp)
+                } else {
+                    Ok(())
+                }
+            }
+            Remove(ref obj) => write!(f, "remove {}", obj),
+            SetDisplay(ref slot, ref obj) => {
+                try!(write!(f, "setdisplay {}", slot));
+                if let Some(ref obj) = *obj {
+                    write!(f, " {}", obj)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+pub enum PlayerCmd {
+    List(Option<Selector>),
+    // FIXME: Option<Nbt> should be Option<NbtCompound>
+    Set(Selector, Objective, i32, Option<Nbt>),
+    // FIXME: Option<Nbt> should be Option<NbtCompound>
+    Add(Selector, Objective, i32, Option<Nbt>),
+    // FIXME: Option<Nbt> should be Option<NbtCompound>
+    Remove(Selector, Objective, i32, Option<Nbt>),
+    Reset(Selector, Option<Objective>),
+    Enable(Selector, Objective),
+    Test(Selector, Objective, Option<i32>, Option<i32>),
+    Operation(Selector, Objective, PlayerOp, Selector, Objective),
+}
+
+impl fmt::Display for PlayerCmd {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::PlayerCmd::*;
+
+        match *self {
+            Set(ref sel, ref obj, ref value, ref data_tag) => {
+                try!(write!(f, "set {} {} {}", sel, obj, value));
+                if let Some(ref data_tag) = *data_tag {
+                    try!(write!(f, " {}", data_tag));
+                }
+                Ok(())
+            }
+            Operation(ref lsel, ref lobj, ref op, ref rsel, ref robj) => {
+                write!(f, "operation {} {} {} {} {}", lsel, lobj, op, rsel, robj)
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
+pub enum PlayerOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Asn,
+    Min,
+    Max,
+    Swp,
+}
+
+impl fmt::Display for PlayerOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::PlayerOp::*;
+
+        write!(f, "{}", match *self {
+            Add => "+=",
+            Sub => "-=",
+            Mul => "*=",
+            Div => "/=",
+            Rem => "%=",
+            Asn => "=",
+            Min => "<",
+            Max => ">",
+            Swp => "><",
+        })
+    }
+}
+
+pub enum TeamCmd {
+    List(Option<Team>),
+    Add(Team, String),
+    Remove(Team),
+    Empty(Team),
+    Join(Team, Vec<Selector>),
+    JoinAll(Team),
+    Leave(Option<Team>, Vec<Selector>),
+    LeaveAll(Option<Team>),
+    Color(Team, String),
+    // TODO: friendlyfire, setFriendlyInvisibles, nametagVisibility
+}
+
+impl fmt::Display for TeamCmd {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        unimplemented!();
+    }
+}

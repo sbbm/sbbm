@@ -1,11 +1,67 @@
 use nbt::NbtCompound;
 use std::cmp::{min, max};
+use std::fmt;
+use self::AbsRel::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
     pub id: String,
     pub data: u8,
     pub nbt: NbtCompound,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AbsRel {
+    Abs(i32),
+    Rel(i32),
+}
+
+impl fmt::Display for AbsRel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        match *self {
+            Abs(x) => write!(f, "{}", x),
+            Rel(x) if x == 0 => write!(f, "~"),
+            Rel(x) => write!(f, "~{}", x),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Pos3 {
+    pub x: AbsRel,
+    pub y: AbsRel,
+    pub z: AbsRel,
+}
+
+pub const ABS_ZERO: Pos3 = Pos3 { x: Abs(0), y: Abs(0), z: Abs(0) };
+pub const REL_ZERO: Pos3 = Pos3 { x: Rel(0), y: Rel(0), z: Rel(0) };
+
+impl Pos3 {
+    pub fn new(x: AbsRel, y: AbsRel, z: AbsRel) -> Pos3 {
+        Pos3 { x: x, y: y, z: z }
+    }
+
+    pub fn rel(x: i32, y: i32, z: i32) -> Pos3 {
+        Pos3::new(Rel(x), Rel(y), Rel(z))
+    }
+
+    pub fn rel_from_vec3(v: Vec3) -> Pos3 {
+        Pos3::rel(v.x, v.y, v.z)
+    }
+
+    pub fn abs(x: i32, y: i32, z: i32) -> Pos3 {
+        Pos3::new(Abs(x), Abs(y), Abs(z))
+    }
+
+    pub fn abs_from_vec3(v: Vec3) -> Pos3 {
+        Pos3::abs(v.x, v.y, v.z)
+    }
+}
+
+impl fmt::Display for Pos3 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{} {} {}", self.x, self.y, self.z)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -34,6 +90,14 @@ impl Vec3 {
             y: max(lhs.y, rhs.y),
             z: max(lhs.z, rhs.z),
         }
+    }
+
+    pub fn as_abs(self) -> Pos3 {
+        Pos3::abs_from_vec3(self)
+    }
+
+    pub fn as_rel(self) -> Pos3 {
+        Pos3::rel_from_vec3(self)
     }
 }
 

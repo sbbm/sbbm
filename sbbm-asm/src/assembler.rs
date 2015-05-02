@@ -1,6 +1,10 @@
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
+use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective};
+use commands::Command::*;
+use commands::ScoreboardCmd::*;
+use core;
 use core::{Block, Extent};
 use std::boxed::FnBox;
 use nbt::*;
@@ -67,83 +71,99 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         }
     }
 
+    fn make_op_cmd_rr(
+        &self, lhs: Register, op: PlayerOp, rhs: Register) -> Command
+    {
+        self.make_op_cmd_xx(
+            self.selector.clone(), reg_name(lhs), op,
+            self.selector.clone(), reg_name(rhs))
+    }
+
+    fn make_op_cmd_rx(
+        &self, lhs: Register, op: PlayerOp, rsel: Selector, robj: Objective)
+        -> Command
+    {
+        self.make_op_cmd_xx(self.selector.clone(), reg_name(lhs), op, rsel, robj)
+    }
+
+    fn make_op_cmd_xr(
+        &self, lsel: Selector, lobj: Objective, op: PlayerOp, rhs: Register)
+        -> Command
+    {
+        self.make_op_cmd_xx(lsel, lobj, op, self.selector.clone(), reg_name(rhs))
+    }
+
+    fn make_op_cmd_xx(
+        &self, lsel: Selector, lobj: Objective, op: PlayerOp, rsel: Selector,
+        robj: Objective) -> Command
+    {
+        Scoreboard(Players(PlayerCmd::Operation(lsel, lobj, op, rsel, robj)))
+    }
+
     fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
         match op {
             AddRR(dst, src) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} += {} {}",
-                        self.selector, reg_name(dst),
-                        self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Add, src));
                 self.emit(Complete(block));
             }
             AddXR(sel, obj, src, success) => {
                 let mut block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} += {} {}",
-                        sel, obj, self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_xr(sel, obj, PlayerOp::Add, src));
                 self.add_success_count(&mut block, success);
                 self.emit(Complete(block));
             }
             SubRR(dst, src) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} -= {} {}",
-                        self.selector, reg_name(dst),
-                        self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Sub, src));
                 self.emit(Complete(block));
             }
             SubXR(sel, obj, src, success) => {
                 let mut block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} -= {} {}",
-                        sel, obj, self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_xr(sel, obj, PlayerOp::Sub, src));
                 self.add_success_count(&mut block, success);
                 self.emit(Complete(block));
             }
             MovRR(dst, src) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} = {} {}",
-                        self.selector, reg_name(dst), self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Asn, src));
                 self.emit(Complete(block));
             }
             MovRI(dst, imm) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players set {} {} {}",
-                        self.selector, reg_name(dst), imm));
+                    &self.entity_name[..], conds,
+                    Scoreboard(Players(PlayerCmd::Set(
+                        self.selector.clone(), reg_name(dst), imm, None))));
                 self.emit(Complete(block));
             }
             MovRX(dst, sel, obj) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} = {} {}",
-                        self.selector, reg_name(dst), sel, obj));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rx(dst, PlayerOp::Asn, sel, obj));
                 self.emit(Complete(block));
             }
             MovXR(sel, obj, src, success) => {
                 let mut block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} = {} {}",
-                        sel, obj, self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_xr(sel, obj, PlayerOp::Asn, src));
                 self.add_success_count(&mut block, success);
                 self.emit(Complete(block));
             }
             MulRR(dst, src) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} *= {} {}",
-                        self.selector, reg_name(dst),
-                        self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Mul, src));
                 self.emit(Complete(block));
             }
             SdivRR(dst, src) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players operation {} {} /= {} {}",
-                        self.selector, reg_name(dst),
-                        self.selector, reg_name(src)));
+                    &self.entity_name[..], conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Div, src));
                 self.emit(Complete(block));
             }
             Srng(dst, test, min, max) => {
@@ -155,14 +175,14 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 }
 
                 let zero_block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players set {} {} 0",
-                        self.selector, reg_name(dst.clone())));
+                    &self.entity_name[..], conds,
+                    Scoreboard(Players(PlayerCmd::Set(
+                        self.selector.clone(), reg_name(dst.clone()), 0, None))));
 
                 let one_block = make_cmd_block(
-                    &self.entity_name[..], one_conds, format!(
-                        "scoreboard players set {} {} 1",
-                        self.selector, reg_name(dst)));
+                    &self.entity_name[..], one_conds,
+                    Scoreboard(Players(PlayerCmd::Set(
+                        self.selector.clone(), reg_name(dst), 1, None))));
 
                 self.emit(Complete(zero_block));
                 self.emit(Complete(one_block));
@@ -173,14 +193,14 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 self.unique += 1;
 
                 let zero_block = make_cmd_block(
-                    &self.entity_name[..], vec!(), format!(
-                        "scoreboard players set {} {} 0",
-                        self.selector, "Test"));
+                    &self.entity_name[..], vec!(),
+                    Scoreboard(Players(PlayerCmd::Set(
+                        self.selector.clone(), "Test".to_string(), 0, None))));
 
                 let one_block = make_cmd_block(
-                    &self.entity_name[..], conds, format!(
-                        "scoreboard players set {} {} 1",
-                        self.selector, "Test"));
+                    &self.entity_name[..], conds,
+                    Scoreboard(Players(PlayerCmd::Set(
+                        self.selector.clone(), "Test".to_string(), 1, None))));
 
                 self.emit(Complete(zero_block));
                 self.emit(Complete(one_block));
@@ -192,10 +212,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                             panic!("oh no!");
                         }
                         Extent::MinMax(min, max) => {
+                            let test_reg = Register::Spec("Test".to_string());
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond::equal(Register::Spec("Test".to_string()), 1)),
-                                format!("fill {} {} {} {} {} {} minecraft:redstone_block",
-                                        min.x, min.y, min.z, max.x, max.y, max.z))
+                                &entity_name[..], vec!(Cond::equal(test_reg, 1)),
+                                Fill(
+                                    min.as_abs(), max.as_abs(),
+                                    "minecraft:redstone_block".to_string(),
+                                    None, None, None))
                         }
                     }
                 })));
@@ -207,10 +230,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                             panic!("oh no!");
                         }
                         Extent::MinMax(min, max) => {
+                            let test_reg = Register::Spec("Test".to_string());
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond::equal(Register::Spec("Test".to_string()), 0)),
-                                format!("fill {} {} {} {} {} {} minecraft:redstone_block",
-                                        min.x, min.y, min.z, max.x, max.y, max.z))
+                                &entity_name[..], vec!(Cond::equal(test_reg, 0)),
+                                Fill(
+                                    min.as_abs(), max.as_abs(),
+                                    "minecraft:redstone_block".to_string(),
+                                    None, None, None))
                         }
                     }
                 })));
@@ -220,12 +246,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             }
             BrR(_) => {
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds, "say FIXME: emit BrR".to_string());
+                    &self.entity_name[..], conds,
+                    Say("FIXME: emit BrR".to_string()));
                 self.emit(Complete(block));
                 self.emit(Terminal);
             }
             RawCmd(cmd) => {
-                let block = make_cmd_block(&self.entity_name[..], conds, cmd);
+                let block = make_cmd_block(&self.entity_name[..], conds, Raw(cmd));
                 self.emit(Complete(block));
             }
             _ => panic!("not implemented: {:?}", op)
@@ -276,8 +303,10 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 Extent::MinMax(min, max) => {
                     make_cmd_block(
                         &entity_name[..], vec!(),
-                        format!("fill {} {} {} {} {} {} minecraft:obsidian",
-                                min.x, min.y, min.z, max.x, max.y, max.z))
+                        Fill(
+                            min.as_abs(), max.as_abs(),
+                            "minecraft:obsidian".to_string(),
+                            None, None, None))
                 }
             }
         }))
@@ -285,7 +314,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
 }
 
-fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: String) -> Block {
+fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: Command) -> Block {
     let mut final_cmd = cmd;
     for cond in conds.into_iter() {
         let sel = format!(
@@ -293,11 +322,11 @@ fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: String) -> Block {
             entity_name,
             reg_name(cond.reg().clone()), fmt_opt(cond.min()),
             reg_name(cond.reg().clone()), fmt_opt(cond.max()));
-        final_cmd = format!("execute {} ~ ~ ~ {}", sel, final_cmd);
+        final_cmd = Command::Execute(sel, core::REL_ZERO, Box::new(final_cmd));
     }
 
     let mut nbt = NbtCompound::new();
-    nbt.insert("Command".to_string(), Nbt::String(final_cmd));
+    nbt.insert("Command".to_string(), Nbt::String(format!("{}", final_cmd)));
     nbt.insert("TrackOutput".to_string(), Nbt::Byte(1));
     Block {
         id: "minecraft:command_block".to_string(),

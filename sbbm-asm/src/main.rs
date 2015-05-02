@@ -8,6 +8,7 @@ extern crate rustc_serialize;
 
 mod assembler;
 mod ast;
+mod commands;
 mod core;
 mod layout;
 mod lexer;
