@@ -148,7 +148,11 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             }
             Srng(dst, test, min, max) => {
                 let mut one_conds = conds.clone();
-                one_conds.push(Cond { reg: test, min: min, max: max });
+                if let Some(cond) = Cond::new(test, min, max) {
+                    one_conds.push(cond);
+                } else {
+                    // TODO: Issue a warning.
+                }
 
                 let zero_block = make_cmd_block(
                     &self.entity_name[..], conds, format!(
@@ -189,7 +193,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         }
                         Extent::MinMax(min, max) => {
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond { reg: Register::Spec("Test".to_string()), min: Some(1), max: Some(1) }),
+                                &entity_name[..], vec!(Cond::equal(Register::Spec("Test".to_string()), 1)),
                                 format!("fill {} {} {} {} {} {} minecraft:redstone_block",
                                         min.x, min.y, min.z, max.x, max.y, max.z))
                         }
@@ -204,7 +208,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         }
                         Extent::MinMax(min, max) => {
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond { reg: Register::Spec("Test".to_string()), min: Some(0), max: Some(0) }),
+                                &entity_name[..], vec!(Cond::equal(Register::Spec("Test".to_string()), 0)),
                                 format!("fill {} {} {} {} {} {} minecraft:redstone_block",
                                         min.x, min.y, min.z, max.x, max.y, max.z))
                         }
@@ -287,8 +291,8 @@ fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: String) -> Block {
         let sel = format!(
             "@e[name={},score_{}_min={},score_{}={}]",
             entity_name,
-            reg_name(cond.reg.clone()), fmt_opt(cond.min),
-            reg_name(cond.reg), fmt_opt(cond.max));
+            reg_name(cond.reg().clone()), fmt_opt(cond.min()),
+            reg_name(cond.reg().clone()), fmt_opt(cond.max()));
         final_cmd = format!("execute {} ~ ~ ~ {}", sel, final_cmd);
     }
 

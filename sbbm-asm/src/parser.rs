@@ -1,15 +1,10 @@
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::str::FromStr;
-use ast::Cond;
-use ast::Op;
+use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
-use ast::Register;
-use ast::Statement;
 use ast::Statement::*;
-use lexer::Lexer;
-use lexer::SpannedToken;
-use lexer::Token;
+use lexer::{Lexer, SpannedToken, Token};
 use lexer::Token::*;
 
 pub struct Parser<'a> {
@@ -188,7 +183,11 @@ impl<'a> Parser<'a> {
             // FIXME: try!
             let max = self.parse_opt_int().unwrap();
             self.expect_tok(RBrace);
-            conds.push(Cond { reg: reg, min: min, max: max });
+            if let Some(cond) = Cond::new(reg, min, max) {
+                conds.push(cond);
+            } else {
+                // TODO: Issue warning.
+            }
         }
         conds
     }
@@ -497,7 +496,7 @@ fn test_cond_op() {
     let mut parser = Parser::new(Lexer::new("{p0, #0, #0} ldr r0, [r1]"));
     assert_eq!(
         vec!(Instr(
-            vec!(Cond { reg: Register::Pred(0), min: 0, max: 0 }),
+            vec!(Cond::equal(Register::Pred(0), 0)),
             LdrRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
@@ -615,7 +614,7 @@ fn test_mov_xi() {
 fn test_mul() {
     let mut parser = Parser::new(Lexer::new("mul r0, r1"));
     assert_eq!(
-        vec!(Instr(vec!(), Mul(Register::Gen(0), Register::Gen(1)))),
+        vec!(Instr(vec!(), MulRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -623,7 +622,7 @@ fn test_mul() {
 fn test_sdiv() {
     let mut parser = Parser::new(Lexer::new("sdiv r0, r1"));
     assert_eq!(
-        vec!(Instr(vec!(), Sdiv(Register::Gen(0), Register::Gen(1)))),
+        vec!(Instr(vec!(), SdivRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -631,7 +630,7 @@ fn test_sdiv() {
 fn test_udiv() {
     let mut parser = Parser::new(Lexer::new("udiv r0, r1"));
     assert_eq!(
-        vec!(Instr(vec!(), Udiv(Register::Gen(0), Register::Gen(1)))),
+        vec!(Instr(vec!(), UdivRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -694,7 +693,7 @@ fn test_raw_cmd_cond() {
     let mut parser = Parser::new(Lexer::new("{p0, #1, #1} raw foo bar baz"));
     assert_eq!(
         vec!(Instr(
-            vec!(Cond { reg: Register::Pred(0), min: 1, max: 1 }),
+            vec!(Cond::equal(Register::Pred(0), 1)),
             RawCmd("foo bar baz".to_string()))),
         parser.parse_program());
 }
