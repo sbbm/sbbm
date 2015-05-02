@@ -395,21 +395,21 @@ impl<'a> Parser<'a> {
         self.expect_tok(Ident("mul".to_string()));
         // FIXME: try!
         let (dst, src) = self.parse_rr().unwrap();
-        Mul(dst, src)
+        MulRR(dst, src)
     }
 
     fn parse_sdiv(&mut self) -> Op {
         self.expect_tok(Ident("sdiv".to_string()));
         // FIXME: try!
         let (dst, src) = self.parse_rr().unwrap();
-        Sdiv(dst, src)
+        SdivRR(dst, src)
     }
 
     fn parse_udiv(&mut self) -> Op {
         self.expect_tok(Ident("udiv".to_string()));
         // FIXME: try!
         let (dst, src) = self.parse_rr().unwrap();
-        Udiv(dst, src)
+        UdivRR(dst, src)
     }
 
     fn parse_rng_args<T>(&mut self) ->

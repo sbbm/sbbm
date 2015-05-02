@@ -130,7 +130,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 self.add_success_count(&mut block, success);
                 self.emit(Complete(block));
             }
-            Mul(dst, src) => {
+            MulRR(dst, src) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds, format!(
                         "scoreboard players operation {} {} *= {} {}",
@@ -138,7 +138,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         self.selector, reg_name(src)));
                 self.emit(Complete(block));
             }
-            Sdiv(dst, src) => {
+            SdivRR(dst, src) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds, format!(
                         "scoreboard players operation {} {} /= {} {}",
