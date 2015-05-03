@@ -213,6 +213,18 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Mul, tmp2);
                 self.accum_bits(conds.clone(), dst, tmp1);
             }
+            Orr(dst, src) => {
+                self.uses_bitwise = true;
+
+                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp2 = self.obj_bit_tmp2.clone();
+
+                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
+                self.expand_bits(conds.clone(), src, tmp2.clone());
+                // 'orr' the bits together.
+                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Max, tmp2);
+                self.accum_bits(conds.clone(), dst, tmp1);
+            }
             MovRR(dst, src) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds,
