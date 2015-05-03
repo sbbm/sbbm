@@ -80,7 +80,6 @@ trait ConnEx {
 impl ConnEx for Connection {
     fn exec(&mut self, cmd: &Command) -> io::Result<String> {
         // FIXME: Minecraft is having trouble keeping up.
-        std::thread::sleep_ms(100);
         self.cmd(&format!("{}", cmd)[..])
     }
 }
@@ -90,17 +89,28 @@ fn init_computer(conn: &mut Connection) {
     use commands::TeamCmd::*;
     use commands::PlayerCmd::Set;
 
+    let comp_sel = "@e[name=computer]".to_string();
+
     for i in (0..32) {
-        let sel = format!("@e[name=computer]");
         let obj = format!("r{}", i);
-        conn.exec(&Command::Scoreboard(Players(Set(sel, obj, 0, None)))).unwrap();
+        conn.exec(&Command::Scoreboard(Players(Set(
+            comp_sel.clone(), obj, 0, None)))).unwrap();
     }
 
+    conn.exec(&Command::Scoreboard(Players(Set(
+        comp_sel.clone(), "ZERO".to_string(), 0, None)))).unwrap();
+    conn.exec(&Command::Scoreboard(Players(Set(
+        comp_sel.clone(), "TWO".to_string(), 2, None)))).unwrap();
+
+    let shifter_team = "Shifters".to_string();
+
     // Bitwise entities
+    conn.exec(&Command::Kill(format!("@e[team={}]", shifter_team))).unwrap();
+    let mut shifters = vec!();
     for i in (0..32) {
         let name = format!("bit_{}", i);
         let sel = format!("@e[name={}]", name);
-        conn.exec(&Command::Kill(sel.clone())).unwrap();
+        shifters.push(sel.clone());
 
         let pos = Pos3::abs(26, 56, i);
         let mut data_tag = NbtCompound::new();
@@ -109,10 +119,17 @@ fn init_computer(conn: &mut Connection) {
             "ArmorStand".to_string(), Some(pos),
             Some(Nbt::Compound(data_tag)))).unwrap();
 
-        conn.exec(&Command::Scoreboard(Teams(Join(
-            "Shifters".to_string(), vec!(sel.clone()))))).unwrap();
+        conn.exec(&Command::Scoreboard(Players(Set(
+            sel.clone(), "BitNumber".to_string(), i, None)))).unwrap();
 
         conn.exec(&Command::Scoreboard(Players(Set(
-            sel, "BitComponent".to_string(), 1 << i, None))));
+            sel, "BitComponent".to_string(), 1 << i, None)))).unwrap();
     }
+
+    conn.exec(&Command::Scoreboard(Teams(Remove(
+        shifter_team.clone())))).unwrap();
+    conn.exec(&Command::Scoreboard(Teams(Add(
+        shifter_team.clone(), None)))).unwrap();
+    conn.exec(&Command::Scoreboard(Teams(Join(
+        "Shifters".to_string(), shifters)))).unwrap();
 }

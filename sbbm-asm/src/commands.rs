@@ -204,7 +204,7 @@ impl fmt::Display for PlayerOp {
 
 pub enum TeamCmd {
     List(Option<Team>),
-    Add(Team, String),
+    Add(Team, Option<String>),
     Remove(Team),
     Empty(Team),
     Join(Team, Vec<Selector>),
@@ -220,6 +220,14 @@ impl fmt::Display for TeamCmd {
         use self::TeamCmd::*;
 
         match *self {
+            Add(ref team, ref disp_name) => {
+                try!(write!(f, "add {}", team));
+                if let Some(ref disp_name) = *disp_name {
+                    try!(write!(f, " {}", disp_name));
+                }
+                Ok(())
+            }
+            Remove(ref team) => write!(f, "remove {}", team),
             Join(ref team, ref selectors) => {
                 try!(write!(f, "join {}", team));
                 for sel in selectors.into_iter() {
