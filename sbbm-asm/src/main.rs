@@ -80,7 +80,7 @@ trait ConnEx {
 impl ConnEx for Connection {
     fn exec(&mut self, cmd: &Command) -> io::Result<String> {
         // FIXME: Minecraft is having trouble keeping up.
-        std::thread::sleep_ms(10);
+        std::thread::sleep_ms(100);
         self.cmd(&format!("{}", cmd)[..])
     }
 }
@@ -90,6 +90,13 @@ fn init_computer(conn: &mut Connection) {
     use commands::TeamCmd::*;
     use commands::PlayerCmd::Set;
 
+    for i in (0..32) {
+        let sel = format!("@e[name=computer]");
+        let obj = format!("r{}", i);
+        conn.exec(&Command::Scoreboard(Players(Set(sel, obj, 0, None)))).unwrap();
+    }
+
+    // Bitwise entities
     for i in (0..32) {
         let name = format!("bit_{}", i);
         let sel = format!("@e[name={}]", name);
