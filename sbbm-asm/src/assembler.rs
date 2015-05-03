@@ -225,6 +225,23 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Max, tmp2);
                 self.accum_bits(conds.clone(), dst, tmp1);
             }
+            Eor(dst, src) => {
+                self.uses_bitwise = true;
+
+                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp2 = self.obj_bit_tmp2.clone();
+
+                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
+                self.expand_bits(conds.clone(), src, tmp2.clone());
+                // 'eor' the bits together.
+                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Add, tmp2);
+                let block = make_cmd_block(
+                    &self.entity_name[..], conds.clone(), self.make_op_cmd_xx(
+                        self.sel_bit_all.clone(), tmp1.clone(), PlayerOp::Rem,
+                        self.selector.clone(), self.obj_two.clone()));
+                self.emit(Complete(block));
+                self.accum_bits(conds.clone(), dst, tmp1);
+            }
             MovRR(dst, src) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds,

@@ -201,6 +201,7 @@ impl<'a> Parser<'a> {
                     "sub" => self.parse_sub(),
                     "and" => self.parse_and(),
                     "orr" => self.parse_orr(),
+                    "eor" => self.parse_eor(),
                     "mov" => self.parse_mov(),
                     "mul" => self.parse_mul(),
                     "sdiv" => self.parse_sdiv(),
@@ -355,6 +356,18 @@ impl<'a> Parser<'a> {
         // FIXME: try!
         let src = self.parse_any_reg().unwrap();
         Orr(dst, src)
+    }
+
+    fn parse_eor(&mut self) -> Op {
+        self.expect_tok(Ident("eor".to_string()));
+
+        // FIXME: try!
+        let dst = self.parse_any_reg().unwrap();
+        // FIXME: try!
+        self.expect_tok(Comma);
+        // FIXME: try!
+        let src = self.parse_any_reg().unwrap();
+        Eor(dst, src)
     }
 
     fn parse_mov(&mut self) -> Op {
