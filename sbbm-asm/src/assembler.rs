@@ -5,7 +5,7 @@ use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective};
 use commands::Command::*;
 use commands::ScoreboardCmd::*;
 use core;
-use core::{Block, Extent};
+use core::{Block, Extent, REL_ZERO};
 use std::boxed::FnBox;
 use nbt::*;
 use std::collections::VecDeque;
@@ -38,29 +38,42 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     buffer: VecDeque<AssembledItem>,
     entity_name: String,
     selector: String,
-    // TODO: Add these.
+    // TODO: Add uses_memory.
     //uses_memory: bool,
-    //uses_bitwise: bool,
+    uses_bitwise: bool,
     done: bool,
     unique: u32,
     pending_labels: Vec<String>,
+    sel_bit_all: Selector,
+    sel_bit_one: Selector,
+    obj_bit_tmp1: Objective,
+    obj_bit_tmp2: Objective,
+    obj_bit_comp: Objective,
+    obj_two: Objective,
 }
 
 impl<S : Iterator<Item=Statement>> Assembler<S> {
     pub fn new(assembly: S) -> Assembler<S> {
         let entity_name = "computer".to_string();
         let selector = format!("@e[name={}]", entity_name);
+        let team_bit = "Shifters";
         Assembler {
             input: assembly,
             buffer: VecDeque::new(),
             entity_name: entity_name,
             selector: selector,
-            // TODO: Add these.
+            // TODO: Add uses_memory.
             //uses_memory: false,
-            //uses_bitwise: false,
+            uses_bitwise: false,
             done: false,
             unique: 0,
             pending_labels: vec!(),
+            sel_bit_all: format!("@e[team={}]", team_bit),
+            sel_bit_one: format!("@e[team={},c=1]", team_bit),
+            obj_bit_tmp1: "BitTmp1".to_string(),
+            obj_bit_tmp2: "BitTmp2".to_string(),
+            obj_bit_comp: "BitComponent".to_string(),
+            obj_two: "TWO".to_string(),
         }
     }
 
@@ -100,6 +113,66 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         Scoreboard(Players(PlayerCmd::Operation(lsel, lobj, op, rsel, robj)))
     }
 
+    fn expand_bits(&mut self, conds: Vec<Cond>, reg: Register, bit_obj: Objective) {
+        let sel_all = self.sel_bit_all.clone();
+
+        // Set all bit entities' bit_obj to the value to be expanded, reg.
+        // Like this: [11, 11, 11, 11]
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(),
+            self.make_op_cmd_xr(
+                sel_all.clone(), bit_obj.clone(), PlayerOp::Asn, reg.clone()));
+        self.emit(Complete(block));
+
+        // Divide all bit entities' bit_obj by their bit component.
+        // Like this: [11, 11, 11, 11] / [8, 4, 2, 1] = [1, 2, 5, 11]
+        let bit_comp = self.obj_bit_comp.clone();
+        self.bit_vec_op(conds.clone(), bit_obj.clone(), PlayerOp::Div, bit_comp);
+
+        // Modulo all bit entities' bit_obj by two to produce a vector of 1s
+        // and 0s representing the bits of reg.
+        // Like this: [1, 2, 5, 11] %= 2 = [1, 0, 1, 1]
+        let block = make_cmd_block(
+            &self.entity_name[..], conds, self.make_op_cmd_xx(
+                sel_all, bit_obj.clone(), PlayerOp::Rem,
+                self.selector.clone(), self.obj_two.clone()));
+        self.emit(Complete(block));
+    }
+
+    fn accum_bits(&mut self, conds: Vec<Cond>, dst: Register, bit_obj: String) {
+        // Multiply all bit entities' bit_obj by their bit component.
+        // Like this: [1, 0, 1, 1] * [8, 4, 2, 1] = [8, 0, 2, 1]
+        let bit_comp = self.obj_bit_comp.clone();
+        self.bit_vec_op(conds.clone(), bit_obj.clone(), PlayerOp::Mul, bit_comp);
+
+        // Zero the dst register.
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(),
+            Scoreboard(Players(PlayerCmd::Set(
+                self.selector.clone(), reg_name(dst.clone()), 0, None))));
+        self.emit(Complete(block));
+
+        // Accumulate the bit entities' bit_obj into dst.
+        // Like this: dst + [8, 0, 2, 1] = 11
+        let block = make_cmd_block(
+            &self.entity_name[..], conds, Execute(
+                self.sel_bit_all.clone(), REL_ZERO,
+                Box::new(self.make_op_cmd_rx(
+                    dst, PlayerOp::Add, self.sel_bit_one.clone(), bit_obj))));
+        self.emit(Complete(block));
+    }
+
+    fn bit_vec_op(&mut self, conds: Vec<Cond>, lhs: Objective, op: PlayerOp, rhs: Objective) {
+        //execute @e[team=Shifters] ~ ~ ~ scoreboard players operation @e[team=Shifters,c=1] BitTmp1 *= @e[team=Shifters,c=1] BitTmp2
+        let block = make_cmd_block(
+            &self.entity_name[..], conds, Execute(
+                self.sel_bit_all.clone(), REL_ZERO,
+                Box::new(self.make_op_cmd_xx(
+                    self.sel_bit_one.clone(), lhs, op,
+                    self.sel_bit_one.clone(), rhs))));
+        self.emit(Complete(block));
+    }
+
     fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
         match op {
             AddRR(dst, src) => {
@@ -127,6 +200,18 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                     self.make_op_cmd_xr(sel, obj, PlayerOp::Sub, src));
                 self.add_success_count(&mut block, success);
                 self.emit(Complete(block));
+            }
+            And(dst, src) => {
+                self.uses_bitwise = true;
+
+                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp2 = self.obj_bit_tmp2.clone();
+
+                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
+                self.expand_bits(conds.clone(), src, tmp2.clone());
+                // 'and' the bits together.
+                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Mul, tmp2);
+                self.accum_bits(conds.clone(), dst, tmp1);
             }
             MovRR(dst, src) => {
                 let block = make_cmd_block(

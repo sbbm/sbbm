@@ -15,10 +15,12 @@ pub enum Command {
     // FIXME: Option<Nbt> should be Option<NbtCompound>
     Fill(Pos3, Pos3, BlockId, Option<BlockData>, Option<FillAction>, Option<Nbt>),
     FillReplace(Pos3, Pos3, BlockId, BlockData, Option<BlockId>, Option<BlockData>),
+    Kill(Selector),
     Say(String),
     // FIXME: Option<Nbt> should be Option<NbtCompound>
     SetBlock(Pos3, BlockId, Option<BlockData>, Option<SetBlockAction>, Option<Nbt>),
     Scoreboard(ScoreboardCmd),
+    Summon(String, Option<Pos3>, Option<Nbt>),
     Raw(String),
 }
 
@@ -45,8 +47,19 @@ impl fmt::Display for Command {
                 }
                 Ok(())
             }
+            Kill(ref sel) => write!(f, "kill {}", sel),
             Say(ref msg) => write!(f, "say {}", msg),
             Scoreboard(ref cmd) => write!(f, "scoreboard {}", cmd),
+            Summon(ref name, ref pos, ref data_tag) => {
+                try!(write!(f, "summon {}", name));
+                if let Some(ref pos) = *pos {
+                    try!(write!(f, " {}", pos));
+                }
+                if let Some(ref data_tag) = *data_tag {
+                    try!(write!(f, " {}", data_tag));
+                }
+                Ok(())
+            }
             Raw(ref raw) => write!(f, "{}", raw),
             _ => unimplemented!()
         }
@@ -204,6 +217,17 @@ pub enum TeamCmd {
 
 impl fmt::Display for TeamCmd {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        unimplemented!();
+        use self::TeamCmd::*;
+
+        match *self {
+            Join(ref team, ref selectors) => {
+                try!(write!(f, "join {}", team));
+                for sel in selectors.into_iter() {
+                    try!(write!(f, " {}", sel));
+                }
+                Ok(())
+            }
+            _ => unimplemented!(),
+        }
     }
 }

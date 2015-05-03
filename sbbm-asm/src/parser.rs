@@ -199,6 +199,7 @@ impl<'a> Parser<'a> {
                     "ldr" => self.parse_ldr(),
                     "add" => self.parse_add(),
                     "sub" => self.parse_sub(),
+                    "and" => self.parse_and(),
                     "mov" => self.parse_mov(),
                     "mul" => self.parse_mul(),
                     "sdiv" => self.parse_sdiv(),
@@ -329,6 +330,18 @@ impl<'a> Parser<'a> {
                 _ => panic!("expected selector but found {:?}", self.cur()),
             }
         }
+    }
+
+    fn parse_and(&mut self) -> Op {
+        self.expect_tok(Ident("and".to_string()));
+
+        // FIXME: try!
+        let dst = self.parse_any_reg().unwrap();
+        // FIXME: try!
+        self.expect_tok(Comma);
+        // FIXME: try!
+        let src = self.parse_any_reg().unwrap();
+        And(dst, src)
     }
 
     fn parse_mov(&mut self) -> Op {
