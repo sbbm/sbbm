@@ -164,6 +164,13 @@ impl fmt::Display for PlayerCmd {
                 }
                 Ok(())
             }
+            Remove(ref sel, ref obj, ref count, ref data_tag) => {
+                try!(write!(f, "remove {} {} {}", sel, obj, count));
+                if let Some(ref data_tag) = *data_tag {
+                    try!(write!(f, " {}", data_tag));
+                }
+                Ok(())
+            }
             Operation(ref lsel, ref lobj, ref op, ref rsel, ref robj) => {
                 write!(f, "operation {} {} {} {} {}", lsel, lobj, op, rsel, robj)
             }

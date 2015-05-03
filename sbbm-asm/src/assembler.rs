@@ -1,7 +1,7 @@
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
-use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective};
+use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective, Team};
 use commands::Command::*;
 use commands::ScoreboardCmd::*;
 use core;
@@ -44,12 +44,15 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     done: bool,
     unique: u32,
     pending_labels: Vec<String>,
+    team_bit: Team,
     sel_bit_all: Selector,
     sel_bit_one: Selector,
     obj_bit_tmp1: Objective,
     obj_bit_tmp2: Objective,
     obj_bit_comp: Objective,
+    obj_bit_num: Objective,
     obj_two: Objective,
+    obj_min: Objective,
 }
 
 impl<S : Iterator<Item=Statement>> Assembler<S> {
@@ -68,12 +71,15 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             done: false,
             unique: 0,
             pending_labels: vec!(),
+            team_bit: team_bit.to_string(),
             sel_bit_all: format!("@e[team={}]", team_bit),
             sel_bit_one: format!("@e[team={},c=1]", team_bit),
             obj_bit_tmp1: "BitTmp1".to_string(),
             obj_bit_tmp2: "BitTmp2".to_string(),
             obj_bit_comp: "BitComponent".to_string(),
+            obj_bit_num: "BitNumber".to_string(),
             obj_two: "TWO".to_string(),
+            obj_min: "MIN".to_string(),
         }
     }
 
@@ -173,6 +179,58 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         self.emit(Complete(block));
     }
 
+    fn raw_shift_right(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
+        let bit_num = self.obj_bit_num.clone();
+        let tmp1 = self.obj_bit_tmp1.clone();
+        let mut lt_zero_conds = conds.clone();
+        lt_zero_conds.push(Cond::lt(dst.clone(), 0));
+
+        let tmp1_reg = Register::Spec(tmp1.clone());
+        let two_reg = Register::Spec(self.obj_two.clone());
+        let min_reg = Register::Spec(self.obj_min.clone());
+
+        // Copy to tmp1
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(), self.make_op_cmd_rr(
+                tmp1_reg.clone(), PlayerOp::Asn, dst.clone()));
+        self.emit(Complete(block));
+
+        // if dst < 0, tmp1 -= i32::MIN
+        let block = make_cmd_block(
+            &self.entity_name[..], lt_zero_conds.clone(),
+            self.make_op_cmd_rr(tmp1_reg.clone(), PlayerOp::Sub, min_reg));
+        self.emit(Complete(block));
+
+        // SIMD copy bitwise entities' BitNumber to tmp1
+        self.bit_vec_op(
+            conds.clone(), tmp1.clone(), PlayerOp::Asn, bit_num);
+
+        // Vector-scalar remove 32 from bitwise entities' tmp1
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(),
+            Scoreboard(Players(PlayerCmd::Remove(
+                self.sel_bit_all.clone(), tmp1.clone(), 32, None))));
+        self.emit(Complete(block));
+
+        // Vector-scalar add shift amount to bitwise entities' tmp1.
+        // This makes all active shifters greater than or equal to zero.
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(), self.make_op_cmd_xr(
+                self.sel_bit_all.clone(), tmp1.clone(), PlayerOp::Add, src));
+        self.emit(Complete(block));
+
+        let active_bit_sel = format!(
+            "@e[team={},score_{}_min=0]",
+            self.team_bit, tmp1);
+        // execute-in-bitwise-entities: divide computer tmp1 by TWO if entity tmp1 > 0
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(), Execute(
+                active_bit_sel, REL_ZERO,
+                Box::new(self.make_op_cmd_rr(
+                    tmp1_reg.clone(), PlayerOp::Div, two_reg))));
+        self.emit(Complete(block));
+    }
+
     fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
         match op {
             AddRR(dst, src) => {
@@ -241,6 +299,34 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         self.selector.clone(), self.obj_two.clone()));
                 self.emit(Complete(block));
                 self.accum_bits(conds.clone(), dst, tmp1);
+            }
+            AsrRR(dst, src) => {
+                self.uses_bitwise = true;
+
+                self.raw_shift_right(conds.clone(), dst.clone(), src);
+
+                let tmp1 = self.obj_bit_tmp1.clone();
+                let mut lt_zero_conds = conds.clone();
+                lt_zero_conds.push(Cond::lt(dst.clone(), 0));
+                let tmp1_reg = Register::Spec(tmp1.clone());
+
+                let sign_bits_sel = format!(
+                    "@e[team={},score_{}_min=-1]",
+                    self.team_bit, tmp1);
+                // if dst < 0 execute-in-bitwise-entities: computer tmp1 += entity BitComponent
+                let block = make_cmd_block(
+                    &self.entity_name[..], lt_zero_conds, Execute(
+                        sign_bits_sel, REL_ZERO,
+                        Box::new(self.make_op_cmd_rx(
+                            tmp1_reg.clone(), PlayerOp::Add,
+                            self.sel_bit_one.clone(), self.obj_bit_comp.clone()))));
+                self.emit(Complete(block));
+
+                // copy computer tmp1 to dst
+                let block = make_cmd_block(
+                    &self.entity_name[..], conds, self.make_op_cmd_rr(
+                        dst, PlayerOp::Asn, tmp1_reg));
+                self.emit(Complete(block));
             }
             MovRR(dst, src) => {
                 let block = make_cmd_block(
@@ -328,7 +414,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         Extent::MinMax(min, max) => {
                             let test_reg = Register::Spec("Test".to_string());
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond::equal(test_reg, 1)),
+                                &entity_name[..], vec!(Cond::eq(test_reg, 1)),
                                 Fill(
                                     min.as_abs(), max.as_abs(),
                                     "minecraft:redstone_block".to_string(),
@@ -346,7 +432,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         Extent::MinMax(min, max) => {
                             let test_reg = Register::Spec("Test".to_string());
                             make_cmd_block(
-                                &entity_name[..], vec!(Cond::equal(test_reg, 0)),
+                                &entity_name[..], vec!(Cond::eq(test_reg, 0)),
                                 Fill(
                                     min.as_abs(), max.as_abs(),
                                     "minecraft:redstone_block".to_string(),
@@ -431,11 +517,20 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: Command) -> Block {
     let mut final_cmd = cmd;
     for cond in conds.into_iter() {
-        let sel = format!(
-            "@e[name={},score_{}_min={},score_{}={}]",
-            entity_name,
-            reg_name(cond.reg().clone()), fmt_opt(cond.min()),
-            reg_name(cond.reg().clone()), fmt_opt(cond.max()));
+        // FIXME: Add a real Selector struct and impl that takes care of this
+        // via the Display trait.
+        let sel = match cond {
+            Cond::Min(reg, min) => format!(
+                "@e[name={},score_{}_min={}]",
+                entity_name, reg_name(reg), min),
+            Cond::Max(reg, max) => format!(
+                "@e[name={},score_{}={}]",
+                entity_name, reg_name(reg), max),
+            Cond::Range(reg, min, max) => format!(
+                "@e[name={},score_{}_min={},score_{}={}]",
+                entity_name,
+                reg_name(reg.clone()), min, reg_name(reg), max),
+        };
         final_cmd = Command::Execute(sel, core::REL_ZERO, Box::new(final_cmd));
     }
 

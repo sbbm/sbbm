@@ -22,8 +22,24 @@ impl Cond {
         }
     }
 
-    pub fn equal(reg: Register, value: i32) -> Cond {
+    pub fn eq(reg: Register, value: i32) -> Cond {
         Cond::Range(reg, value, value)
+    }
+
+    pub fn lt(reg: Register, value: i32) -> Cond {
+        Cond::Max(reg, value - 1)
+    }
+
+    pub fn le(reg: Register, value: i32) -> Cond {
+        Cond::Max(reg, value)
+    }
+
+    pub fn gt(reg: Register, value: i32) -> Cond {
+        Cond::Min(reg, value + 1)
+    }
+
+    pub fn ge(reg: Register, value: i32) -> Cond {
+        Cond::Min(reg, value)
     }
 
     pub fn reg<'a>(&'a self) -> &'a Register {

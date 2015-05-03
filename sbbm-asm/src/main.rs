@@ -101,6 +101,8 @@ fn init_computer(conn: &mut Connection) {
         comp_sel.clone(), "ZERO".to_string(), 0, None)))).unwrap();
     conn.exec(&Command::Scoreboard(Players(Set(
         comp_sel.clone(), "TWO".to_string(), 2, None)))).unwrap();
+    conn.exec(&Command::Scoreboard(Players(Set(
+        comp_sel.clone(), "MIN".to_string(), std::i32::MIN, None)))).unwrap();
 
     let shifter_team = "Shifters".to_string();
 
