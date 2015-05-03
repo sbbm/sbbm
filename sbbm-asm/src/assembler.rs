@@ -328,6 +328,32 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                         dst, PlayerOp::Asn, tmp1_reg));
                 self.emit(Complete(block));
             }
+            LsrRR(dst, src) => {
+                self.uses_bitwise = true;
+
+                self.raw_shift_right(conds.clone(), dst.clone(), src);
+
+                let tmp1 = self.obj_bit_tmp1.clone();
+                let mut lt_zero_conds = conds.clone();
+                lt_zero_conds.push(Cond::lt(dst.clone(), 0));
+                let tmp1_reg = Register::Spec(tmp1.clone());
+
+                let high_bit_sel = format!(
+                    "@e[team={},score_{}_min=-1,score_{}=-1,c=1]",
+                    self.team_bit, tmp1, tmp1);
+                // if dst < 0 computer tmp1 += entity[high-bit] BitComponent
+                let block = make_cmd_block(
+                    &self.entity_name[..], lt_zero_conds, self.make_op_cmd_rx(
+                        tmp1_reg.clone(), PlayerOp::Add,
+                        high_bit_sel, self.obj_bit_comp.clone()));
+                self.emit(Complete(block));
+
+                // copy computer tmp1 to dst
+                let block = make_cmd_block(
+                    &self.entity_name[..], conds, self.make_op_cmd_rr(
+                        dst, PlayerOp::Asn, tmp1_reg));
+                self.emit(Complete(block));
+            }
             MovRR(dst, src) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds,
