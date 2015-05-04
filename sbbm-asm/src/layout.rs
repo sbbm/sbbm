@@ -1,6 +1,7 @@
 use assembler::{AssembledItem, PendingFn};
 use assembler::AssembledItem::*;
-use core::{Block, Extent, Vec3};
+use types::{Block, Extent, Vec3};
+
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::mem;

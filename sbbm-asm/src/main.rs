@@ -9,7 +9,7 @@ extern crate rustc_serialize;
 mod assembler;
 mod ast;
 mod commands;
-mod core;
+mod types;
 mod layout;
 mod lexer;
 mod nbt;
@@ -17,16 +17,16 @@ mod parser;
 
 use assembler::Assembler;
 use commands::Command;
-use core::{Pos3, Vec3};
 use docopt::Docopt;
 use layout::{Layout, LinearMotion};
 use lexer::Lexer;
 use nbt::{Nbt, NbtCompound};
 use parser::Parser;
 use rcon::Connection;
+use types::{Pos3, Vec3};
+
 use std::fs::File;
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::Path;
 
 static USAGE : &'static str = "

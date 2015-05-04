@@ -4,6 +4,9 @@ use std::str::FromStr;
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
+use commands::Objective;
+// FIXME: Avoiding conflict with Token::Selector.
+use commands::Selector as Sel;
 use lexer::{Lexer, SpannedToken, Token};
 use lexer::Token::*;
 
@@ -41,18 +44,20 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_tok(&mut self, token: Token) {
-        if self.cur().item != token {
-            // FIXME: Don't panic.
+    fn expect_tok(&mut self, token: Token) -> ParseResult<()> {
+        if self.cur().item == token {
+            self.accept();
+            Ok(())
+        } else {
             // FIXME: Switch to Display instead of Debug
-            panic!(format!("expected {:?} but found {:?}", token, self.cur()))
+            Err(format!("expected {:?} but found {:?}", token, self.cur()))
         }
-        self.accept();
     }
 
     pub fn parse_program(&mut self) -> Vec<Statement> {
         let stmts = self.parse_items();
-        self.expect_tok(Eof);
+        // FIXME: try!
+        self.expect_tok(Eof).unwrap();
         stmts
     }
 
@@ -74,12 +79,12 @@ impl<'a> Parser<'a> {
                 Some(LabelStmt(label[..label.len()-1].to_string()))
             }
             Ident(_) => {
-                let op = self.parse_op();
+                let op = self.parse_op().unwrap();
                 Some(Instr(vec!(), op))
             }
             LBrace => {
-                let conds = self.parse_conds();
-                let op = self.parse_op();
+                let conds = self.parse_conds().unwrap();
+                let op = self.parse_op().unwrap();
                 Some(Instr(conds, op))
             }
             Raw(raw) => {
@@ -107,13 +112,11 @@ impl<'a> Parser<'a> {
     fn parse_any_reg(&mut self) -> ParseResult<Register> {
         match self.cur().item {
             GenReg(reg) => {
-                // FIXME: try!
                 let num = reg[1..].parse::<i32>().unwrap();
                 self.accept();
                 Ok(Register::Gen(num))
             }
             PredReg(reg) => {
-                // FIXME: try!
                 let num = reg[1..].parse::<i32>().unwrap();
                 self.accept();
                 Ok(Register::Pred(num))
@@ -132,16 +135,18 @@ impl<'a> Parser<'a> {
     {
         match self.cur().item {
             LitInt(s) => {
-                // FIXME: try!
-                match s[1..].parse::<T>() {
-                    Ok(num) => {
-                        self.accept();
-                        Ok(num)
-                    }
-                    Err(e) => Err(format!("{}", e)),
+                // No need to handle errors: the lexer has already ensured that
+                // s contains a valid int prefixed with #.
+                self.accept();
+                if let Ok(value) = s[1..].parse::<T>() {
+                    Ok(value)
+                } else {
+                    // FIXME: It would be nice to just call .unwrap, but I can't
+                    // seem to get the type constraints right for it.
+                    unreachable!();
                 }
             }
-            // FIXME: Move to Display, rather than Debug
+            // FIXME: Print with Display, rather than Debug
             _ => Err(format!("expected integer but found {:?}", self.cur())),
         }
     }
@@ -157,7 +162,7 @@ impl<'a> Parser<'a> {
             self.accept();
             Ok(None)
         } else {
-            // FIXME: Move to Display, rather than Debug
+            // FIXME: Print with Display, rather than Debug
             Err(format!("expected optional integer but found {:?}", self.cur()))
         }
     }
@@ -165,100 +170,109 @@ impl<'a> Parser<'a> {
     fn parse_objective(&mut self) -> ParseResult<String> {
         match self.cur().item {
             Ident(obj) => { self.accept(); Ok(obj) }
-            // FIXME: Move to Display, rather than Debug
+            // FIXME: Print with Display, rather than Debug
             _ => Err(format!("expected objective but found {:?}", self.cur())),
         }
     }
 
-    fn parse_conds(&mut self) -> Vec<Cond> {
+    fn parse_conds(&mut self) -> ParseResult<Vec<Cond>> {
         let mut conds = vec!();
         while self.cur().item == LBrace {
             self.accept();
-            // FIXME: try!
-            let reg = self.parse_any_reg().unwrap();
-            self.expect_tok(Comma);
-            // FIXME: try!
-            let min = self.parse_opt_int().unwrap();
-            self.expect_tok(Comma);
-            // FIXME: try!
-            let max = self.parse_opt_int().unwrap();
-            self.expect_tok(RBrace);
+            let reg = try!(self.parse_any_reg());
+            try!(self.expect_tok(Comma));
+            let min = try!(self.parse_opt_int());
+            try!(self.expect_tok(Comma));
+            let max = try!(self.parse_opt_int());
+            try!(self.expect_tok(RBrace));
             if let Some(cond) = Cond::new(reg, min, max) {
                 conds.push(cond);
             } else {
                 // TODO: Issue warning.
             }
         }
-        conds
+        Ok(conds)
     }
 
-    fn parse_op(&mut self) -> Op {
+    fn parse_op(&mut self) -> ParseResult<Op> {
         match self.cur().item {
             Ident(mnemonic) => {
-                match &mnemonic[..] {
+                let res = match &mnemonic[..] {
                     "ldr" => self.parse_ldr(),
-                    "add" => self.parse_add(),
-                    "sub" => self.parse_sub(),
-                    "and" => self.parse_and(),
-                    "orr" => self.parse_orr(),
-                    "eor" => self.parse_eor(),
-                    "asr" => self.parse_asr(),
-                    "lsr" => self.parse_lsr(),
-                    "lsl" => self.parse_lsl(),
+                    m @ "add" => self.parse_addsub(m, AddRR, AddXI, AddXR),
+                    m @ "sub" => self.parse_addsub(m, SubRR, SubXI, SubXR),
+                    m @ "and" => self.parse_instr_rr(m, And),
+                    m @ "orr" => self.parse_instr_rr(m, Orr),
+                    m @ "eor" => self.parse_instr_rr(m, Eor),
+                    m @ "asr" => self.parse_instr_rr(m, AsrRR),
+                    m @ "lsr" => self.parse_instr_rr(m, LsrRR),
+                    m @ "lsl" => self.parse_instr_rr(m, LslRR),
                     "mov" => self.parse_mov(),
-                    "mul" => self.parse_mul(),
-                    "sdiv" => self.parse_sdiv(),
-                    "udiv" => self.parse_udiv(),
-                    "srng" => self.parse_srng(),
-                    "urng" => self.parse_urng(),
-                    "b" => self.parse_b(),
-                    "bl" => self.parse_bl(),
+                    m @ "mul" => self.parse_instr_rr(m, MulRR),
+                    m @ "sdiv" => self.parse_instr_rr(m, SdivRR),
+                    m @ "udiv" => self.parse_instr_rr(m, UdivRR),
+                    m @ "srng" => self.parse_rng::<_, i32>(m, Srng),
+                    m @ "urng" => self.parse_rng::<_, u32>(m, Urng),
+                    m @ "b" => self.parse_branch(m, BrR, BrL),
+                    m @ "bl" => self.parse_branch(m, BrLnkR, BrLnkL),
                     "halt" => self.parse_halt(),
-                    // FIXME: Don't panic, return ParseResult
-                    _ => panic!("unknown mnemonic: {}", mnemonic),
-                }
+                    _ => Err(format!("unknown mnemonic: {:?}", self.cur())),
+                };
+                res
             }
             Raw(raw) => {
                 self.accept();
-                RawCmd(raw)
+                Ok(RawCmd(raw))
             }
             // FIXME: Move to Display instead of Debug.
-            // FIXME: Return ParseResult
-            _ => panic!("expected mnemonic but found {:?}", self.cur()),
+            _ => Err(format!("expected mnemonic but found {:?}", self.cur())),
         }
     }
 
-    fn parse_ldr(&mut self) -> Op {
-        self.expect_tok(Ident("ldr".to_string()));
-        // FIXME: try!
-        let dst = self.parse_any_reg().unwrap();
-        self.expect_tok(Comma);
+    fn parse_instr_rr<F>(&mut self, mnemo: &str, op: F) -> ParseResult<Op>
+        where F : FnOnce(Register, Register) -> Op
+    {
+        try!(self.expect_tok(Ident(mnemo.to_string())));
+        let dst = try!(self.parse_any_reg());
+        try!(self.expect_tok(Comma));
+        let src = try!(self.parse_any_reg());
+        Ok(op(dst, src))
+    }
+
+    fn parse_ldr(&mut self) -> ParseResult<Op> {
+        try!(self.expect_tok(Ident("ldr".to_string())));
+        let dst = try!(self.parse_any_reg());
+        try!(self.expect_tok(Comma));
 
         match self.cur().item {
             LBracket => {
                 self.accept();
-                let src = self.parse_any_reg().unwrap();
-                self.expect_tok(RBracket);
-                Op::LdrRR(dst, src)
+                let src = try!(self.parse_any_reg());
+                try!(self.expect_tok(RBracket));
+                Ok(LdrRR(dst, src))
             }
             LabelRef(lblref) => {
                 let src = lblref[1..].to_string();
                 self.accept();
-                Op::LdrRL(dst, src)
+                Ok(LdrRL(dst, src))
             }
-            // FIXME: Don't panic.  Do better with the error message.
-            _ => panic!("invalid ldr format {:?}", self.cur()),
+            // FIXME: Do better with this error message.
+            _ => Err(format!("invalid ldr format {:?}", self.cur())),
         }
     }
 
-    // FIXME: Unify the handling of parse_add and parse_sub?
-    fn parse_add(&mut self) -> Op {
-        self.expect_tok(Ident("add".to_string()));
+    fn parse_addsub<RR, XI, XR>(
+        &mut self, mnemo: &str, rr: RR, xi: XI, xr: XR) -> ParseResult<Op>
+        where RR : FnOnce(Register, Register) -> Op,
+              XI : FnOnce(Sel, Objective, i32, Register) -> Op,
+              XR : FnOnce(Sel, Objective, Register, Register) -> Op
+    {
+        try!(self.expect_tok(Ident(mnemo.to_string())));
 
         if let Ok(dst) = self.parse_any_reg() {
-            self.expect_tok(Comma);
+            try!(self.expect_tok(Comma));
             if let Ok(src) = self.parse_any_reg() {
-                AddRR(dst, src)
+                Ok(rr(dst, src))
             } else {
                 unimplemented!();
             }
@@ -266,283 +280,127 @@ impl<'a> Parser<'a> {
             match self.cur().item {
                 Selector(sel) => {
                     self.accept();
-                    self.expect_tok(Comma);
-                    // FIXME: try!
-                    let obj = self.parse_objective().unwrap();
-                    self.expect_tok(Comma);
+                    try!(self.expect_tok(Comma));
+                    let obj = try!(self.parse_objective());
+                    try!(self.expect_tok(Comma));
+
                     if let Ok(imm) = self.parse_int() {
-                        // FIXME: try!
-                        self.expect_tok(Comma);
-                        // FIXME: try!
-                        let out_reg = self.parse_any_reg().unwrap();
-                        AddXI(sel, obj, imm, out_reg)
+                        try!(self.expect_tok(Comma));
+                        let out_reg = try!(self.parse_any_reg());
+                        Ok(xi(sel, obj, imm, out_reg))
                     } else if let Ok(reg) = self.parse_any_reg() {
-                        // FIXME: try!
-                        self.expect_tok(Comma);
-                        // FIXME: try!
-                        let out_reg = self.parse_any_reg().unwrap();
-                        AddXR(sel, obj, reg, out_reg)
+                        try!(self.expect_tok(Comma));
+                        let out_reg = try!(self.parse_any_reg());
+                        Ok(xr(sel, obj, reg, out_reg))
                     } else {
-                        // FIXME: Don't panic.
-                        panic!("expected register or immediate but found {:?}", self.cur());
+                        // FIXME: Print with Display rather than Debug.
+                        Err(format!(
+                            "expected register or immediate but found {:?}",
+                            self.cur()))
                     }
                 }
-                // FIXME: Don't panic.
-                _ => panic!("expected selector but found {:?}", self.cur()),
+                _ => {
+                    // FIXME: Print with Display rather than Debug.
+                    Err(format!(
+                        "expected selector but found {:?}", self.cur()))
+                }
             }
         }
     }
 
-    fn parse_sub(&mut self) -> Op {
-        self.expect_tok(Ident("sub".to_string()));
+    fn parse_mov(&mut self) -> ParseResult<Op> {
+        try!(self.expect_tok(Ident("mov".to_string())));
 
         if let Ok(dst) = self.parse_any_reg() {
-            // FIXME: try!
-            self.expect_tok(Comma);
+            try!(self.expect_tok(Comma));
             if let Ok(src) = self.parse_any_reg() {
-                SubRR(dst, src)
-            } else {
-                unimplemented!();
-            }
-        } else {
-            match self.cur().item {
-                Selector(sel) => {
-                    self.accept();
-                    // FIXME: try!
-                    self.expect_tok(Comma);
-                    // FIXME: try!
-                    let obj = self.parse_objective().unwrap();
-                    // FIXME: try!
-                    self.expect_tok(Comma);
-                    if let Ok(imm) = self.parse_int() {
-                        // FIXME: try!
-                        self.expect_tok(Comma);
-                        // FIXME: try!
-                        let out_reg = self.parse_any_reg().unwrap();
-                        SubXI(sel, obj, imm, out_reg)
-                    } else if let Ok(reg) = self.parse_any_reg() {
-                        // FIXME: try!
-                        self.expect_tok(Comma);
-                        // FIXME: try!
-                        let out_reg = self.parse_any_reg().unwrap();
-                        SubXR(sel, obj, reg, out_reg)
-                    } else {
-                        // FIXME: Don't panic.
-                        panic!("expected register or immediate but found {:?}", self.cur());
-                    }
-                }
-                // FIXME: Don't panic.
-                _ => panic!("expected selector but found {:?}", self.cur()),
-            }
-        }
-    }
-
-    fn parse_and(&mut self) -> Op {
-        self.expect_tok(Ident("and".to_string()));
-
-        // FIXME: try!
-        let dst = self.parse_any_reg().unwrap();
-        // FIXME: try!
-        self.expect_tok(Comma);
-        // FIXME: try!
-        let src = self.parse_any_reg().unwrap();
-        And(dst, src)
-    }
-
-    fn parse_orr(&mut self) -> Op {
-        self.expect_tok(Ident("orr".to_string()));
-
-        // FIXME: try!
-        let dst = self.parse_any_reg().unwrap();
-        // FIXME: try!
-        self.expect_tok(Comma);
-        // FIXME: try!
-        let src = self.parse_any_reg().unwrap();
-        Orr(dst, src)
-    }
-
-    fn parse_eor(&mut self) -> Op {
-        self.expect_tok(Ident("eor".to_string()));
-
-        // FIXME: try!
-        let dst = self.parse_any_reg().unwrap();
-        // FIXME: try!
-        self.expect_tok(Comma);
-        // FIXME: try!
-        let src = self.parse_any_reg().unwrap();
-        Eor(dst, src)
-    }
-
-    fn parse_asr(&mut self) -> Op {
-        self.expect_tok(Ident("asr".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        AsrRR(dst, src)
-    }
-
-    fn parse_lsr(&mut self) -> Op {
-        self.expect_tok(Ident("lsr".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        LsrRR(dst, src)
-    }
-
-    fn parse_lsl(&mut self) -> Op {
-        self.expect_tok(Ident("lsl".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        LslRR(dst, src)
-    }
-
-    fn parse_mov(&mut self) -> Op {
-        self.expect_tok(Ident("mov".to_string()));
-
-        if let Ok(dst) = self.parse_any_reg() {
-            // FIXME: try!
-            self.expect_tok(Comma);
-            if let Ok(src) = self.parse_any_reg() {
-                MovRR(dst, src)
+                Ok(MovRR(dst, src))
             } else if let Ok(imm) = self.parse_int() {
-                MovRI(dst, imm)
+                Ok(MovRI(dst, imm))
             } else if let Selector(sel) = self.cur().item {
                 self.accept();
-                // FIXME: try!
-                self.expect_tok(Comma);
-                // FIXME: try!
-                let obj = self.parse_objective().unwrap();
-                MovRX(dst, sel, obj)
+                try!(self.expect_tok(Comma));
+                let obj = try!(self.parse_objective());
+                Ok(MovRX(dst, sel, obj))
             } else {
-                // FIXME: Don't panic.
-                panic!("expected register, immediate, or selector but found {:?}", self.cur());
+                // FIXME: Print with Display rather than Debug.
+                Err(format!(
+                    "expected register, immediate, or selector but found {:?}",
+                    self.cur()))
             }
         } else if let Selector(sel) = self.cur().item {
             self.accept();
-            // FIXME: try!
-            self.expect_tok(Comma);
-            // FIXME: try!
-            let obj = self.parse_objective().unwrap();
-            // FIXME: try!
-            self.expect_tok(Comma);
+            try!(self.expect_tok(Comma));
+            let obj = try!(self.parse_objective());
+            try!(self.expect_tok(Comma));
 
             if let Ok(src) = self.parse_any_reg() {
-                // FIXME: try!
-                self.expect_tok(Comma);
-                // FIXME: try!
-                let out_reg = self.parse_any_reg().unwrap();
-                MovXR(sel, obj, src, out_reg)
+                try!(self.expect_tok(Comma));
+                let out_reg = try!(self.parse_any_reg());
+                Ok(MovXR(sel, obj, src, out_reg))
             } else if let Ok(imm) = self.parse_int() {
-                // FIXME: try!
-                self.expect_tok(Comma);
-                // FIXME: try!
-                let out_reg = self.parse_any_reg().unwrap();
-                MovXI(sel, obj, imm, out_reg)
+                try!(self.expect_tok(Comma));
+                let out_reg = try!(self.parse_any_reg());
+                Ok(MovXI(sel, obj, imm, out_reg))
             } else {
-                panic!("expected register or immediate but found {:?}", self.cur());
+                // FIXME: Print with Display rather than Debug.
+                Err(format!(
+                    "expected register or immediate but found {:?}",
+                    self.cur()))
             }
         } else {
-            // FIXME: Don't panic.
-            panic!("expected register or selector but found {:?}", self.cur());
+            // FIXME: Print with Display rather than Debug.
+            Err(format!(
+                "expected register or selector but found {:?}",
+                self.cur()))
         }
     }
 
-    fn parse_rr(&mut self) -> ParseResult<(Register, Register)> {
-        let dst = try!(self.parse_any_reg());
-        // FIXME: try!
-        self.expect_tok(Comma);
-        let src = try!(self.parse_any_reg());
-        Ok((dst, src))
-    }
-
-    fn parse_mul(&mut self) -> Op {
-        self.expect_tok(Ident("mul".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        MulRR(dst, src)
-    }
-
-    fn parse_sdiv(&mut self) -> Op {
-        self.expect_tok(Ident("sdiv".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        SdivRR(dst, src)
-    }
-
-    fn parse_udiv(&mut self) -> Op {
-        self.expect_tok(Ident("udiv".to_string()));
-        // FIXME: try!
-        let (dst, src) = self.parse_rr().unwrap();
-        UdivRR(dst, src)
-    }
-
-    fn parse_rng_args<T>(&mut self) ->
-        ParseResult<(Register, Register, Option<T>, Option<T>)>
-        where T : FromStr, T::Err : Display
+    fn parse_rng<F, T>(&mut self, mnemo: &str, op: F) -> ParseResult<Op>
+        where F : FnOnce(Register, Register, Option<T>, Option<T>) -> Op,
+              T : FromStr, T::Err : Display
     {
+        try!(self.expect_tok(Ident(mnemo.to_string())));
         let dst = try!(self.parse_any_reg());
-        // FIXME: try!
-        self.expect_tok(Comma);
+        try!(self.expect_tok(Comma));
         let reg = try!(self.parse_any_reg());
-        // FIXME: try!
-        self.expect_tok(Comma);
+        try!(self.expect_tok(Comma));
         let min = try!(self.parse_opt_int());
-        // FIXME: try!
-        self.expect_tok(Comma);
+        try!(self.expect_tok(Comma));
         let max = try!(self.parse_opt_int());
 
-        Ok((dst, reg, min, max))
+        Ok(op(dst, reg, min, max))
     }
 
-    fn parse_srng(&mut self) -> Op {
-        self.expect_tok(Ident("srng".to_string()));
-        // FIXME: try!
-        let (dst, reg, min, max) = self.parse_rng_args().unwrap();
-        Srng(dst, reg, min, max)
-    }
+    fn parse_branch<R, L>(
+        &mut self, mnemo: &str, regop: R, lblop: L) -> ParseResult<Op>
+        where R : FnOnce(Register) -> Op,
+    L : FnOnce(String) -> Op
+    {
+        try!(self.expect_tok(Ident(mnemo.to_string())));
 
-    fn parse_urng(&mut self) -> Op {
-        self.expect_tok(Ident("urng".to_string()));
-        // FIXME: try!
-        let (dst, reg, min, max) = self.parse_rng_args().unwrap();
-        Urng(dst, reg, min, max)
-    }
-
-    fn parse_halt(&mut self) -> Op {
-        self.expect_tok(Ident("halt".to_string()));
-        Halt
-    }
-
-    // FIXME: Unify the handling of parse_b and parse_bl
-
-    fn parse_b(&mut self) -> Op {
-        self.expect_tok(Ident("b".to_string()));
         if let Ok(reg) = self.parse_any_reg() {
-            BrR(reg)
+            Ok(regop(reg))
         } else {
             match self.cur().item {
                 LabelRef(label) => {
                     self.accept();
-                    BrL(label[1..].to_string())
+                    Ok(lblop(label[1..].to_string()))
                 }
-                // FIXME: Don't panic.
-                _ => panic!("expected register or label but found: {:?}", self.cur()),
+                _ => {
+                    // FIXME: Print with Display, rather than Debug.
+                    let msg = format!(
+                        "expected register or label but found: {:?}",
+                        self.cur());
+                    Err(msg)
+                }
             }
         }
     }
 
-    fn parse_bl(&mut self) -> Op {
-        self.expect_tok(Ident("bl".to_string()));
-        if let Ok(reg) = self.parse_any_reg() {
-            BrLnkR(reg)
-        } else {
-            match self.cur().item {
-                LabelRef(label) => {
-                    self.accept();
-                    BrLnkL(label[1..].to_string())
-                }
-                // FIXME: Don't panic.
-                _ => panic!("expected register or label but found: {:?}", self.cur()),
-            }
-        }
+    fn parse_halt(&mut self) -> ParseResult<Op> {
+        try!(self.expect_tok(Ident("halt".to_string())));
+        Ok(Halt)
     }
 }
 
@@ -559,7 +417,7 @@ fn test_cond_op() {
     let mut parser = Parser::new(Lexer::new("{p0, #0, #0} ldr r0, [r1]"));
     assert_eq!(
         vec!(Instr(
-            vec!(Cond::equal(Register::Pred(0), 0)),
+            vec!(Cond::eq(Register::Pred(0), 0)),
             LdrRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
@@ -756,7 +614,7 @@ fn test_raw_cmd_cond() {
     let mut parser = Parser::new(Lexer::new("{p0, #1, #1} raw foo bar baz"));
     assert_eq!(
         vec!(Instr(
-            vec!(Cond::equal(Register::Pred(0), 1)),
+            vec!(Cond::eq(Register::Pred(0), 1)),
             RawCmd("foo bar baz".to_string()))),
         parser.parse_program());
 }

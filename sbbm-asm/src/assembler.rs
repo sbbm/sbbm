@@ -4,13 +4,14 @@ use ast::Statement::*;
 use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective, Team};
 use commands::Command::*;
 use commands::ScoreboardCmd::*;
-use core;
-use core::{Block, Extent, REL_ZERO};
 use std::boxed::FnBox;
 use nbt::*;
+use types::{self, Block, Extent, REL_ZERO};
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::mem;
+
 use self::AssembledItem::*;
 
 pub type PendingFn = Box<FnBox(Extent) -> Block>;
@@ -582,7 +583,7 @@ fn make_cmd_block(entity_name: &str, conds: Vec<Cond>, cmd: Command) -> Block {
                 entity_name,
                 reg_name(reg.clone()), min, reg_name(reg), max),
         };
-        final_cmd = Command::Execute(sel, core::REL_ZERO, Box::new(final_cmd));
+        final_cmd = Command::Execute(sel, types::REL_ZERO, Box::new(final_cmd));
     }
 
     let mut nbt = NbtCompound::new();

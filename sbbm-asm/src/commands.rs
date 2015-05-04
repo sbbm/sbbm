@@ -1,4 +1,4 @@
-use core::Pos3;
+use types::Pos3;
 use nbt::Nbt;
 use std::fmt;
 
