@@ -179,6 +179,29 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         self.emit(Complete(block));
     }
 
+    fn activate_bitwise_entities(&mut self, conds: Vec<Cond>, amount: Register) {
+        let bit_num = self.obj_bit_num.clone();
+        let tmp1 = self.obj_bit_tmp1.clone();
+
+        // SIMD copy bitwise entities' BitNumber to tmp1
+        self.bit_vec_op(
+            conds.clone(), tmp1.clone(), PlayerOp::Asn, bit_num);
+
+        // Vector-scalar remove 32 from bitwise entities' tmp1
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(),
+            Scoreboard(Players(PlayerCmd::Remove(
+                self.sel_bit_all.clone(), tmp1.clone(), 32, None))));
+        self.emit(Complete(block));
+
+        // Vector-scalar add shift amount to bitwise entities' tmp1.
+        // This makes all active shifters greater than or equal to zero.
+        let block = make_cmd_block(
+            &self.entity_name[..], conds.clone(), self.make_op_cmd_xr(
+                self.sel_bit_all.clone(), tmp1.clone(), PlayerOp::Add, amount));
+        self.emit(Complete(block));
+    }
+
     fn raw_shift_right(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
         let bit_num = self.obj_bit_num.clone();
         let tmp1 = self.obj_bit_tmp1.clone();
@@ -201,23 +224,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             self.make_op_cmd_rr(tmp1_reg.clone(), PlayerOp::Sub, min_reg));
         self.emit(Complete(block));
 
-        // SIMD copy bitwise entities' BitNumber to tmp1
-        self.bit_vec_op(
-            conds.clone(), tmp1.clone(), PlayerOp::Asn, bit_num);
-
-        // Vector-scalar remove 32 from bitwise entities' tmp1
-        let block = make_cmd_block(
-            &self.entity_name[..], conds.clone(),
-            Scoreboard(Players(PlayerCmd::Remove(
-                self.sel_bit_all.clone(), tmp1.clone(), 32, None))));
-        self.emit(Complete(block));
-
-        // Vector-scalar add shift amount to bitwise entities' tmp1.
-        // This makes all active shifters greater than or equal to zero.
-        let block = make_cmd_block(
-            &self.entity_name[..], conds.clone(), self.make_op_cmd_xr(
-                self.sel_bit_all.clone(), tmp1.clone(), PlayerOp::Add, src));
-        self.emit(Complete(block));
+        self.activate_bitwise_entities(conds.clone(), src);
 
         let active_bit_sel = format!(
             "@e[team={},score_{}_min=0]",
@@ -352,6 +359,24 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds, self.make_op_cmd_rr(
                         dst, PlayerOp::Asn, tmp1_reg));
+                self.emit(Complete(block));
+            }
+            LslRR(dst, src) => {
+                self.uses_bitwise = true;
+
+                self.activate_bitwise_entities(conds.clone(), src);
+
+                let two_reg = Register::Spec(self.obj_two.clone());
+
+                let active_bit_sel = format!(
+                    "@e[team={},score_{}_min=0]",
+                    self.team_bit, self.obj_bit_tmp1.clone());
+                // execute-in-bitwise-entities: dst *= TWO
+                let block = make_cmd_block(
+                    &self.entity_name[..], conds.clone(), Execute(
+                        active_bit_sel, REL_ZERO,
+                        Box::new(self.make_op_cmd_rr(
+                            dst, PlayerOp::Mul, two_reg))));
                 self.emit(Complete(block));
             }
             MovRR(dst, src) => {

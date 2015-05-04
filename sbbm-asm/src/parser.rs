@@ -204,6 +204,7 @@ impl<'a> Parser<'a> {
                     "eor" => self.parse_eor(),
                     "asr" => self.parse_asr(),
                     "lsr" => self.parse_lsr(),
+                    "lsl" => self.parse_lsl(),
                     "mov" => self.parse_mov(),
                     "mul" => self.parse_mul(),
                     "sdiv" => self.parse_sdiv(),
@@ -384,6 +385,13 @@ impl<'a> Parser<'a> {
         // FIXME: try!
         let (dst, src) = self.parse_rr().unwrap();
         LsrRR(dst, src)
+    }
+
+    fn parse_lsl(&mut self) -> Op {
+        self.expect_tok(Ident("lsl".to_string()));
+        // FIXME: try!
+        let (dst, src) = self.parse_rr().unwrap();
+        LslRR(dst, src)
     }
 
     fn parse_mov(&mut self) -> Op {
