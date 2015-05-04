@@ -15,7 +15,7 @@ mod nbt;
 mod parser;
 
 use assembler::Assembler;
-use commands::{Command, Selector};
+use commands::{Command, Selector, objectives, players, teams};
 use docopt::Docopt;
 use layout::{Layout, LinearMotion};
 use lexer::Lexer;
@@ -86,85 +86,65 @@ impl<W : Write> MinecraftConn for W {
     }
 }
 
-fn init_computer(conn: &mut MinecraftConn) {
+fn init_computer(conn: &mut MinecraftConn) -> io::Result<()> {
     let comp_sel = "@e[name=computer]".to_string();
 
-    conn.exec(&Command::Kill(comp_sel.clone())).unwrap();
+    try!(conn.exec(&Command::Kill(comp_sel.clone())));
     let pos = Pos3::abs(25, 56, 0);
     let mut data_tag = NbtCompound::new();
     data_tag.insert("CustomName".to_string(), Nbt::String("computer".to_string()));
-    conn.exec(&Command::Summon(
+    try!(conn.exec(&Command::Summon(
         "ArmorStand".to_string(), Some(pos),
-        Some(Nbt::Compound(data_tag)))).unwrap();
+        Some(Nbt::Compound(data_tag)))));
 
-    init_registers(conn, comp_sel.clone());
-    init_bitwise(conn);
+    try!(init_registers(conn, comp_sel.clone()));
+    try!(init_bitwise(conn));
+
+    Ok(())
 }
 
-fn init_registers(conn: &mut MinecraftConn, comp_sel: Selector) {
-    use commands::ScoreboardCmd::*;
-    use commands::PlayerCmd::Set;
-    use commands::ObjCmd;
-
+fn init_registers(conn: &mut MinecraftConn, comp_sel: Selector) -> io::Result<()> {
     // General registers
     for i in (0..32) {
         let obj = format!("r{}", i);
 
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Remove(
-            obj.clone())))).unwrap();
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Add(
-            obj.clone(), "dummy".to_string(), None)))).unwrap();
-        conn.exec(&Command::Scoreboard(Players(Set(
-            comp_sel.clone(), obj, 0, None)))).unwrap();
+        try!(conn.exec(&objectives::remove(obj.clone())));
+        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.exec(&players::set(comp_sel.clone(), obj, 0, None)));
     }
 
     // Predicate registers
     for i in (0..8) {
         let obj = format!("p{}", i);
 
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Remove(
-            obj.clone())))).unwrap();
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Add(
-            obj.clone(), "dummy".to_string(), None)))).unwrap();
-        conn.exec(&Command::Scoreboard(Players(Set(
-            comp_sel.clone(), obj, 0, None)))).unwrap();
+        try!(conn.exec(&objectives::remove(obj.clone())));
+        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.exec(&players::set(comp_sel.clone(), obj, 0, None)));
     }
 
     // Special registers (implementation details)
     for name in ["ZERO", "TWO", "MIN", "TEST"].iter() {
         let obj = name.to_string();
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Remove(
-            obj.clone())))).unwrap();
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Add(
-            obj, "dummy".to_string(), None)))).unwrap();
+        try!(conn.exec(&objectives::remove(obj.clone())));
+        try!(conn.exec(&objectives::add(obj, "dummy".to_string(), None)));
     }
 
-    conn.exec(&Command::Scoreboard(Players(Set(
-        comp_sel.clone(), "ZERO".to_string(), 0, None)))).unwrap();
-    conn.exec(&Command::Scoreboard(Players(Set(
-        comp_sel.clone(), "TWO".to_string(), 2, None)))).unwrap();
-    conn.exec(&Command::Scoreboard(Players(Set(
-        comp_sel.clone(), "MIN".to_string(), std::i32::MIN, None)))).unwrap();
-
+    try!(conn.exec(&players::set(comp_sel.clone(), "ZERO".to_string(), 0, None)));
+    try!(conn.exec(&players::set(comp_sel.clone(), "TWO".to_string(), 2, None)));
+    try!(conn.exec(&players::set(comp_sel.clone(), "MIN".to_string(), std::i32::MIN, None)));
+    Ok(())
 }
 
-fn init_bitwise(conn: &mut MinecraftConn) {
-    use commands::ScoreboardCmd::*;
-    use commands::ObjCmd;
-    use commands::PlayerCmd::Set;
-    use commands::TeamCmd::*;
-
+fn init_bitwise(conn: &mut MinecraftConn) -> io::Result<()> {
     for obj in ["BitComponent", "BitNumber"].iter() {
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Remove(
-            obj.to_string())))).unwrap();
-        conn.exec(&Command::Scoreboard(Objectives(ObjCmd::Add(
-            obj.to_string(), "dummy".to_string(), None)))).unwrap();
+        try!(conn.exec(&objectives::remove(obj.to_string())));
+        try!(conn.exec(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
     }
 
     let bit_team = "Shifters".to_string();
 
     // Bitwise entities
-    conn.exec(&Command::Kill(format!("@e[team={}]", bit_team))).unwrap();
+    try!(conn.exec(&Command::Kill(format!("@e[team={}]", bit_team))));
     let mut shifters = vec!();
     for i in (0..32) {
         let name = format!("bit_{}", i);
@@ -174,20 +154,17 @@ fn init_bitwise(conn: &mut MinecraftConn) {
         let pos = Pos3::abs(26, 56, i);
         let mut data_tag = NbtCompound::new();
         data_tag.insert("CustomName".to_string(), Nbt::String(name.clone()));
-        conn.exec(&Command::Summon(
+        try!(conn.exec(&Command::Summon(
             "ArmorStand".to_string(), Some(pos),
-            Some(Nbt::Compound(data_tag)))).unwrap();
+            Some(Nbt::Compound(data_tag)))));
 
-        conn.exec(&Command::Scoreboard(Players(Set(
-            sel.clone(), "BitNumber".to_string(), i, None)))).unwrap();
-
-        conn.exec(&Command::Scoreboard(Players(Set(
-            sel, "BitComponent".to_string(), 1 << i, None)))).unwrap();
+        try!(conn.exec(&players::set(sel.clone(), "BitNumber".to_string(), i, None)));
+        try!(conn.exec(&players::set(sel, "BitComponent".to_string(), 1 << i, None)));
     }
-    conn.exec(&Command::Scoreboard(Teams(Remove(
-        bit_team.clone())))).unwrap();
-    conn.exec(&Command::Scoreboard(Teams(Add(
-        bit_team.clone(), None)))).unwrap();
-    conn.exec(&Command::Scoreboard(Teams(Join(
-        bit_team, shifters)))).unwrap();
+
+    try!(conn.exec(&teams::remove(bit_team.clone())));
+    try!(conn.exec(&teams::add(bit_team.clone(), None)));
+    try!(conn.exec(&teams::join(bit_team, shifters)));
+
+    Ok(())
 }

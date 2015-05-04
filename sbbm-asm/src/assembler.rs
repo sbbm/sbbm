@@ -1,9 +1,8 @@
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
-use commands::{Command, PlayerCmd, PlayerOp, Selector, Objective, Team};
+use commands::{Command, PlayerOp, Selector, Objective, Team, players};
 use commands::Command::*;
-use commands::ScoreboardCmd::*;
 use std::boxed::FnBox;
 use nbt::*;
 use types::{self, Block, Extent, REL_ZERO};
@@ -94,7 +93,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     fn make_op_cmd_rr(
         &self, lhs: Register, op: PlayerOp, rhs: Register) -> Command
     {
-        self.make_op_cmd_xx(
+        players::op(
             self.selector.clone(), reg_name(lhs), op,
             self.selector.clone(), reg_name(rhs))
     }
@@ -103,21 +102,14 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         &self, lhs: Register, op: PlayerOp, rsel: Selector, robj: Objective)
         -> Command
     {
-        self.make_op_cmd_xx(self.selector.clone(), reg_name(lhs), op, rsel, robj)
+        players::op(self.selector.clone(), reg_name(lhs), op, rsel, robj)
     }
 
     fn make_op_cmd_xr(
         &self, lsel: Selector, lobj: Objective, op: PlayerOp, rhs: Register)
         -> Command
     {
-        self.make_op_cmd_xx(lsel, lobj, op, self.selector.clone(), reg_name(rhs))
-    }
-
-    fn make_op_cmd_xx(
-        &self, lsel: Selector, lobj: Objective, op: PlayerOp, rsel: Selector,
-        robj: Objective) -> Command
-    {
-        Scoreboard(Players(PlayerCmd::Operation(lsel, lobj, op, rsel, robj)))
+        players::op(lsel, lobj, op, self.selector.clone(), reg_name(rhs))
     }
 
     fn expand_bits(&mut self, conds: Vec<Cond>, reg: Register, bit_obj: Objective) {
@@ -140,8 +132,8 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         // and 0s representing the bits of reg.
         // Like this: [1, 2, 5, 11] %= 2 = [1, 0, 1, 1]
         let block = make_cmd_block(
-            &self.entity_name[..], conds, self.make_op_cmd_xx(
-                sel_all, bit_obj.clone(), PlayerOp::Rem,
+            &self.entity_name[..], conds, players::rem_op(
+                sel_all, bit_obj.clone(),
                 self.selector.clone(), self.obj_two.clone()));
         self.emit(Complete(block));
     }
@@ -155,8 +147,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         // Zero the dst register.
         let block = make_cmd_block(
             &self.entity_name[..], conds.clone(),
-            Scoreboard(Players(PlayerCmd::Set(
-                self.selector.clone(), reg_name(dst.clone()), 0, None))));
+            players::set(self.selector.clone(), reg_name(dst.clone()), 0, None));
         self.emit(Complete(block));
 
         // Accumulate the bit entities' bit_obj into dst.
@@ -174,7 +165,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         let block = make_cmd_block(
             &self.entity_name[..], conds, Execute(
                 self.sel_bit_all.clone(), REL_ZERO,
-                Box::new(self.make_op_cmd_xx(
+                Box::new(players::op(
                     self.sel_bit_one.clone(), lhs, op,
                     self.sel_bit_one.clone(), rhs))));
         self.emit(Complete(block));
@@ -191,8 +182,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         // Vector-scalar remove 32 from bitwise entities' tmp1
         let block = make_cmd_block(
             &self.entity_name[..], conds.clone(),
-            Scoreboard(Players(PlayerCmd::Remove(
-                self.sel_bit_all.clone(), tmp1.clone(), 32, None))));
+            players::remove(self.sel_bit_all.clone(), tmp1.clone(), 32, None));
         self.emit(Complete(block));
 
         // Vector-scalar add shift amount to bitwise entities' tmp1.
@@ -302,8 +292,8 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 // 'eor' the bits together.
                 self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Add, tmp2);
                 let block = make_cmd_block(
-                    &self.entity_name[..], conds.clone(), self.make_op_cmd_xx(
-                        self.sel_bit_all.clone(), tmp1.clone(), PlayerOp::Rem,
+                    &self.entity_name[..], conds.clone(), players::rem_op(
+                        self.sel_bit_all.clone(), tmp1.clone(),
                         self.selector.clone(), self.obj_two.clone()));
                 self.emit(Complete(block));
                 self.accum_bits(conds.clone(), dst, tmp1);
@@ -389,8 +379,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             MovRI(dst, imm) => {
                 let block = make_cmd_block(
                     &self.entity_name[..], conds,
-                    Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), reg_name(dst), imm, None))));
+                    players::set(self.selector.clone(), reg_name(dst), imm, None));
                 self.emit(Complete(block));
             }
             MovRX(dst, sel, obj) => {
@@ -428,13 +417,12 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
                 let zero_block = make_cmd_block(
                     &self.entity_name[..], conds,
-                    Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), reg_name(dst.clone()), 0, None))));
+                    players::set(
+                        self.selector.clone(), reg_name(dst.clone()), 0, None));
 
                 let one_block = make_cmd_block(
                     &self.entity_name[..], one_conds,
-                    Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), reg_name(dst), 1, None))));
+                    players::set(self.selector.clone(), reg_name(dst), 1, None));
 
                 self.emit(Complete(zero_block));
                 self.emit(Complete(one_block));
@@ -446,13 +434,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
                 let zero_block = make_cmd_block(
                     &self.entity_name[..], vec!(),
-                    Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), "TEST".to_string(), 0, None))));
+                    players::set(
+                        self.selector.clone(), "TEST".to_string(), 0, None));
 
                 let one_block = make_cmd_block(
                     &self.entity_name[..], conds,
-                    Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), "TEST".to_string(), 1, None))));
+                    players::set(
+                        self.selector.clone(), "TEST".to_string(), 1, None));
 
                 self.emit(Complete(zero_block));
                 self.emit(Complete(one_block));
@@ -602,14 +590,6 @@ fn reg_name(reg: Register) -> String {
         Register::Gen(n) => format!("r{}", n),
         Register::Pred(n) => format!("p{}", n),
         Register::Spec(s) => s,
-    }
-}
-
-fn fmt_opt<T : ToString>(value: Option<T>) -> String {
-    if let Some(value) = value {
-        value.to_string()
-    } else {
-        "*".to_string()
     }
 }
 

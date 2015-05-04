@@ -170,6 +170,31 @@ impl fmt::Display for ObjCmd {
     }
 }
 
+pub mod objectives {
+    use super::{Command, DisplaySlot, ObjCmd, Objective};
+    use super::ObjCmd::*;
+
+    fn make_cmd(cmd: ObjCmd) -> Command {
+        Command::Scoreboard(super::ScoreboardCmd::Objectives(cmd))
+    }
+
+    pub fn list() -> Command {
+        make_cmd(List)
+    }
+
+    pub fn add(obj: Objective, criteria: String, display_name: Option<String>) -> Command {
+        make_cmd(Add(obj, criteria, display_name))
+    }
+
+    pub fn remove(obj: Objective) -> Command {
+        make_cmd(Remove(obj))
+    }
+
+    pub fn set_display(slot: DisplaySlot, obj: Option<Objective>) -> Command {
+        make_cmd(SetDisplay(slot, obj))
+    }
+}
+
 pub enum PlayerCmd {
     List(Option<Selector>),
     // FIXME: Option<Nbt> should be Option<NbtCompound>
@@ -241,6 +266,72 @@ impl fmt::Display for PlayerOp {
     }
 }
 
+pub mod players {
+    use super::{Command, PlayerCmd, PlayerOp, Selector, Objective};
+    use super::PlayerCmd::*;
+    use nbt::Nbt;
+
+    fn make_cmd(cmd: PlayerCmd) -> Command {
+        Command::Scoreboard(super::ScoreboardCmd::Players(cmd))
+    }
+
+    pub fn list(sel: Option<Selector>) -> Command {
+        make_cmd(List(sel))
+    }
+
+    pub fn set(sel: Selector, obj: Objective, value: i32, tag: Option<Nbt>) -> Command {
+        make_cmd(Set(sel, obj, value, tag))
+    }
+
+    pub fn add(sel: Selector, obj: Objective, count: i32, tag: Option<Nbt>) -> Command {
+        make_cmd(Add(sel, obj, count, tag))
+    }
+
+    pub fn remove(sel: Selector, obj: Objective, count: i32, tag: Option<Nbt>) -> Command {
+        make_cmd(Remove(sel, obj, count, tag))
+    }
+
+    pub fn reset(sel: Selector, obj: Option<Objective>) -> Command {
+        make_cmd(Reset(sel, obj))
+    }
+
+    pub fn enable(sel: Selector, trigger: Objective) -> Command {
+        make_cmd(Enable(sel, trigger))
+    }
+
+    pub fn test(sel: Selector, obj: Objective, min: Option<i32>, max: Option<i32>) -> Command {
+        make_cmd(Test(sel, obj, min, max))
+    }
+
+    pub fn op(
+        sel_lhs: Selector, obj_lhs: Objective, op: PlayerOp,
+        sel_rhs: Selector, obj_rhs: Objective) -> Command
+    {
+        make_cmd(Operation(sel_lhs, obj_lhs, op, sel_rhs, obj_rhs))
+    }
+
+    macro_rules! op_impl {
+        ($name:ident, $op:ident) => {
+            pub fn $name(
+                sel_lhs: Selector, obj_lhs: Objective,
+                sel_rhs: Selector, obj_rhs: Objective) -> Command
+            {
+                op(sel_lhs, obj_lhs, PlayerOp::$op, sel_rhs, obj_rhs)
+            }
+        }
+    }
+
+    op_impl!(add_op, Add);
+    op_impl!(sub_op, Sub);
+    op_impl!(mul_op, Mul);
+    op_impl!(div_op, Div);
+    op_impl!(rem_op, Rem);
+    op_impl!(asn_op, Asn);
+    op_impl!(min_op, Min);
+    op_impl!(max_op, Max);
+    op_impl!(swp_op, Swp);
+}
+
 pub enum TeamCmd {
     List(Option<Team>),
     Add(Team, Option<String>),
@@ -276,5 +367,50 @@ impl fmt::Display for TeamCmd {
             }
             _ => unimplemented!(),
         }
+    }
+}
+
+pub mod teams {
+    use super::{Command, TeamCmd, Selector, Team};
+    use super::TeamCmd::*;
+
+    fn make_cmd(cmd: TeamCmd) -> Command {
+        Command::Scoreboard(super::ScoreboardCmd::Teams(cmd))
+    }
+
+    pub fn list(team: Option<Team>) -> Command {
+        make_cmd(List(team))
+    }
+
+    pub fn add(team: Team, display_name: Option<String>) -> Command {
+        make_cmd(Add(team, display_name))
+    }
+
+    pub fn remove(team: Team) -> Command {
+        make_cmd(Remove(team))
+    }
+
+    pub fn empty(team: Team) -> Command {
+        make_cmd(Empty(team))
+    }
+
+    pub fn join(team: Team, sels: Vec<Selector>) -> Command {
+        make_cmd(Join(team, sels))
+    }
+
+    pub fn join_all(team: Team) -> Command {
+        make_cmd(JoinAll(team))
+    }
+
+    pub fn leave(team: Option<Team>, sels: Vec<Selector>) -> Command {
+        make_cmd(Leave(team, sels))
+    }
+
+    pub fn leave_all(team: Option<Team>) -> Command {
+        make_cmd(LeaveAll(team))
+    }
+
+    pub fn color(team: Team, color: String) -> Command {
+        make_cmd(Color(team, color))
     }
 }
