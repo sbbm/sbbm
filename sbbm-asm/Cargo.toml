@@ -8,6 +8,3 @@ docopt = "*"
 regex = "0.1.30"
 regex_macros = "0.1.17"
 rustc-serialize = "*"
-
-[dependencies.rcon]
-git = "https://github.com/panicbit/rust-rcon.git"

@@ -447,12 +447,12 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 let zero_block = make_cmd_block(
                     &self.entity_name[..], vec!(),
                     Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), "Test".to_string(), 0, None))));
+                        self.selector.clone(), "TEST".to_string(), 0, None))));
 
                 let one_block = make_cmd_block(
                     &self.entity_name[..], conds,
                     Scoreboard(Players(PlayerCmd::Set(
-                        self.selector.clone(), "Test".to_string(), 1, None))));
+                        self.selector.clone(), "TEST".to_string(), 1, None))));
 
                 self.emit(Complete(zero_block));
                 self.emit(Complete(one_block));
@@ -464,7 +464,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                             panic!("oh no!");
                         }
                         Extent::MinMax(min, max) => {
-                            let test_reg = Register::Spec("Test".to_string());
+                            let test_reg = Register::Spec("TEST".to_string());
                             make_cmd_block(
                                 &entity_name[..], vec!(Cond::eq(test_reg, 1)),
                                 Fill(
@@ -482,7 +482,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                             panic!("oh no!");
                         }
                         Extent::MinMax(min, max) => {
-                            let test_reg = Register::Spec("Test".to_string());
+                            let test_reg = Register::Spec("TEST".to_string());
                             make_cmd_block(
                                 &entity_name[..], vec!(Cond::eq(test_reg, 0)),
                                 Fill(

@@ -34,21 +34,32 @@ impl fmt::Display for Command {
             Fill(
                 ref min, ref max, ref block_id, ref block_data, ref action,
                 ref data_tag) =>
-            {
-                try!(write!(f, "fill {} {} {}", min, max, block_id));
-                if let Some(ref block_data) = *block_data {
-                    try!(write!(f, " {}", block_data));
+                {
+                    try!(write!(
+                        f, "fill {} {} {} {} {}",
+                        min, max, block_id, block_data.unwrap_or(0),
+                        action.unwrap_or(FillAction::Replace)));
+
+                    if let Some(ref data_tag) = *data_tag {
+                        try!(write!(f, " {}", data_tag));
+                    }
+                    Ok(())
                 }
-                if let Some(ref action) = *action {
-                    try!(write!(f, " {}", action));
-                }
-                if let Some(ref data_tag) = *data_tag {
-                    try!(write!(f, " {}", data_tag));
-                }
-                Ok(())
-            }
             Kill(ref sel) => write!(f, "kill {}", sel),
             Say(ref msg) => write!(f, "say {}", msg),
+            SetBlock(
+                ref pos, ref block_id, ref block_data, ref action, ref data_tag) =>
+                {
+                    try!(write!(
+                        f, "setblock {} {} {} {}",
+                        pos, block_id, block_data.unwrap_or(0),
+                        action.unwrap_or(SetBlockAction::Replace)));
+
+                    if let Some(ref data_tag) = *data_tag {
+                        try!(write!(f, " {}", data_tag));
+                    }
+                    Ok(())
+                }
             Scoreboard(ref cmd) => write!(f, "scoreboard {}", cmd),
             Summon(ref name, ref pos, ref data_tag) => {
                 try!(write!(f, "summon {}", name));
@@ -66,12 +77,26 @@ impl fmt::Display for Command {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum SetBlockAction {
     Destroy,
     Keep,
     Replace,
 }
 
+impl fmt::Display for SetBlockAction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        use self::SetBlockAction::*;
+
+        f.write_str(match *self {
+            Destroy => "destroy",
+            Keep => "keep",
+            Replace => "replace",
+        })
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum FillAction {
     Destroy,
     Hollow,
@@ -82,7 +107,14 @@ pub enum FillAction {
 
 impl fmt::Display for FillAction {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        unimplemented!();
+        use self::FillAction::*;
+        f.write_str(match *self {
+            Destroy => "destroy",
+            Hollow => "hollow",
+            Keep => "keep",
+            Outline => "outline",
+            Replace => "replace",
+        })
     }
 }
 
