@@ -1,0 +1,6 @@
+*.json
+eula.txt
+server.properties
+minecraft_server*.jar
+logs/
+world/

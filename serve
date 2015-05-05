@@ -1,0 +1,49 @@
+#!/bin/bash
+
+pushd `dirname $0` > /dev/null
+SCRIPT_DIR=`pwd`
+popd > /dev/null
+
+SERVER_DIR="$SCRIPT_DIR/server"
+MINECRAFT_JAR="$SERVER_DIR/minecraft_server.1.8.4.jar"
+
+Main()
+{
+    pushd "$SERVER_DIR"
+
+    # The Minecraft server writes to server.properties as it runs, so to prevent
+    # constantly-dirty files in source control, copy over a template.
+    cp server.properties.in server.properties
+
+    export INPUT="$SERVER_DIR/input"
+    export OUTPUT="$SERVER_DIR/output"
+    export CAPTURE="$SERVER_DIR/capture"
+
+    rm -f "$INPUT" "$OUTPUT" "$CAPTURE" || exit 1
+    mkfifo "$INPUT" "$OUTPUT" || exit 1
+
+    trap CleanUp HUP INT TERM
+
+    java -Xms1G -Xmx1G -jar "$MINECRAFT_JAR" nogui <> "$INPUT" | Listen
+
+    CleanUp
+}
+
+CleanUp()
+{
+    rm -f "$INPUT" "$OUTPUT" "$CAPTURE"
+}
+
+Listen()
+{
+    while read line; do
+        if [ -f "$CAPTURE" ]; then
+            echo "CAPTURED: $line"
+            echo "$line" >> "$OUTPUT"
+        else
+            echo "$line"
+        fi
+    done
+}
+
+Main
