@@ -1,14 +1,14 @@
-use std::collections::VecDeque;
-use std::fmt::Display;
-use std::str::FromStr;
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
-use commands::Objective;
-// FIXME: Avoiding conflict with Token::Selector.
-use commands::Selector as Sel;
+use commands::{self, Objective, Target};
 use lexer::{Lexer, SpannedToken, Token};
 use lexer::Token::*;
+use types::Interval;
+
+use std::collections::VecDeque;
+use std::fmt::Display;
+use std::str::FromStr;
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -185,8 +185,8 @@ impl<'a> Parser<'a> {
             try!(self.expect_tok(Comma));
             let max = try!(self.parse_opt_int());
             try!(self.expect_tok(RBrace));
-            if let Some(cond) = Cond::new(reg, min, max) {
-                conds.push(cond);
+            if let Some(interval) = Interval::new(min, max) {
+                conds.push(Cond::new(reg, interval));
             } else {
                 // TODO: Issue warning.
             }
@@ -264,8 +264,8 @@ impl<'a> Parser<'a> {
     fn parse_addsub<RR, XI, XR>(
         &mut self, mnemo: &str, rr: RR, xi: XI, xr: XR) -> ParseResult<Op>
         where RR : FnOnce(Register, Register) -> Op,
-              XI : FnOnce(Sel, Objective, i32, Register) -> Op,
-              XR : FnOnce(Sel, Objective, Register, Register) -> Op
+              XI : FnOnce(Target, Objective, i32, Register) -> Op,
+              XR : FnOnce(Target, Objective, Register, Register) -> Op
     {
         try!(self.expect_tok(Ident(mnemo.to_string())));
 
@@ -278,7 +278,10 @@ impl<'a> Parser<'a> {
             }
         } else {
             match self.cur().item {
+                // REVIEW: Selector only covers @-prefixed targets.
                 Selector(sel) => {
+                    let target = Target::Raw(sel);
+
                     self.accept();
                     try!(self.expect_tok(Comma));
                     let obj = try!(self.parse_objective());
@@ -287,11 +290,11 @@ impl<'a> Parser<'a> {
                     if let Ok(imm) = self.parse_int() {
                         try!(self.expect_tok(Comma));
                         let out_reg = try!(self.parse_any_reg());
-                        Ok(xi(sel, obj, imm, out_reg))
+                        Ok(xi(target, obj, imm, out_reg))
                     } else if let Ok(reg) = self.parse_any_reg() {
                         try!(self.expect_tok(Comma));
                         let out_reg = try!(self.parse_any_reg());
-                        Ok(xr(sel, obj, reg, out_reg))
+                        Ok(xr(target, obj, reg, out_reg))
                     } else {
                         // FIXME: Print with Display rather than Debug.
                         Err(format!(
@@ -317,18 +320,22 @@ impl<'a> Parser<'a> {
                 Ok(MovRR(dst, src))
             } else if let Ok(imm) = self.parse_int() {
                 Ok(MovRI(dst, imm))
+            // REVIEW: Selector only covers @-prefixed targets.
             } else if let Selector(sel) = self.cur().item {
                 self.accept();
                 try!(self.expect_tok(Comma));
                 let obj = try!(self.parse_objective());
-                Ok(MovRX(dst, sel, obj))
+                Ok(MovRX(dst, Target::Raw(sel), obj))
             } else {
                 // FIXME: Print with Display rather than Debug.
                 Err(format!(
                     "expected register, immediate, or selector but found {:?}",
                     self.cur()))
             }
+        // REVIEW: Selector only covers @-prefixed targets.
         } else if let Selector(sel) = self.cur().item {
+            let target = Target::Raw(sel);
+
             self.accept();
             try!(self.expect_tok(Comma));
             let obj = try!(self.parse_objective());
@@ -337,11 +344,11 @@ impl<'a> Parser<'a> {
             if let Ok(src) = self.parse_any_reg() {
                 try!(self.expect_tok(Comma));
                 let out_reg = try!(self.parse_any_reg());
-                Ok(MovXR(sel, obj, src, out_reg))
+                Ok(MovXR(target, obj, src, out_reg))
             } else if let Ok(imm) = self.parse_int() {
                 try!(self.expect_tok(Comma));
                 let out_reg = try!(self.parse_any_reg());
-                Ok(MovXI(sel, obj, imm, out_reg))
+                Ok(MovXI(target, obj, imm, out_reg))
             } else {
                 // FIXME: Print with Display rather than Debug.
                 Err(format!(
@@ -451,7 +458,8 @@ fn test_add_rr() {
 fn test_add_xi() {
     let mut parser = Parser::new(Lexer::new("add @a, foo, #10, r0"));
     assert_eq!(
-        vec!(Instr(vec!(), AddXI("@a".to_string(), "foo".to_string(), 10, Register::Gen(0)))),
+        vec!(Instr(vec!(), AddXI(
+            Target::Raw("@a".to_string()), "foo".to_string(), 10, Register::Gen(0)))),
         parser.parse_program());
 }
 
@@ -460,7 +468,7 @@ fn test_add_xr() {
     let mut parser = Parser::new(Lexer::new("add @a, foo, r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), AddXR(
-            "@a".to_string(), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
+            Target::Raw("@a".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -478,7 +486,8 @@ fn test_sub_rr() {
 fn test_sub_xi() {
     let mut parser = Parser::new(Lexer::new("sub @a, foo, #10, r0"));
     assert_eq!(
-        vec!(Instr(vec!(), SubXI("@a".to_string(), "foo".to_string(), 10, Register::Gen(0)))),
+        vec!(Instr(vec!(), SubXI(
+            Target::Raw("@a".to_string()), "foo".to_string(), 10, Register::Gen(0)))),
         parser.parse_program());
 }
 
@@ -487,7 +496,7 @@ fn test_sub_xr() {
     let mut parser = Parser::new(Lexer::new("sub @a, foo, r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), SubXR(
-            "@a".to_string(), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
+            Target::Raw("@a".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -511,7 +520,7 @@ fn test_mov_ri() {
 fn test_mov_rx() {
     let mut parser = Parser::new(Lexer::new("mov r0, @r, foo"));
     assert_eq!(
-        vec!(Instr(vec!(), MovRX(Register::Gen(0), "@r".to_string(), "foo".to_string()))),
+        vec!(Instr(vec!(), MovRX(Register::Gen(0), Target::Raw("@r".to_string()), "foo".to_string()))),
         parser.parse_program());
 }
 
@@ -519,7 +528,7 @@ fn test_mov_rx() {
 fn test_mov_xr() {
     let mut parser = Parser::new(Lexer::new("mov @r, foo, r0, r1"));
     assert_eq!(
-        vec!(Instr(vec!(), MovXR("@r".to_string(), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
+        vec!(Instr(vec!(), MovXR(Target::Raw("@r".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
 }
 
@@ -527,7 +536,7 @@ fn test_mov_xr() {
 fn test_mov_xi() {
     let mut parser = Parser::new(Lexer::new("mov @r, foo, #15, r0"));
     assert_eq!(
-        vec!(Instr(vec!(), MovXI("@r".to_string(), "foo".to_string(), 15, Register::Gen(0)))),
+        vec!(Instr(vec!(), MovXI(Target::Raw("@r".to_string()), "foo".to_string(), 15, Register::Gen(0)))),
         parser.parse_program());
 }
 

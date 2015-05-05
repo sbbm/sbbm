@@ -1,79 +1,45 @@
-#[derive(Clone, Debug, Eq, PartialEq)]
+use commands::{Target, Objective};
+use types::Interval;
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
     LabelStmt(String),
     Instr(Vec<Cond>, Op),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Cond {
-    Min(Register, i32),
-    Max(Register, i32),
-    Range(Register, i32, i32),
+pub struct Cond {
+    pub reg: Register,
+    pub interval: Interval<i32>
 }
 
 impl Cond {
-    // TODO: Return Result<Cond, {SomeErrorType}> instead of Option<Cond>
-    pub fn new(reg: Register, min: Option<i32>, max: Option<i32>) -> Option<Cond> {
-        match (min, max) {
-            (Some(min), Some(max)) => Some(Cond::Range(reg, min, max)),
-            (Some(min), None) => Some(Cond::Min(reg, min)),
-            (None, Some(max)) => Some(Cond::Max(reg, max)),
-            (None, None) => None,
-        }
+    pub fn new(reg: Register, interval: Interval<i32>) -> Cond {
+        Cond { reg: reg, interval: interval }
     }
 
     pub fn eq(reg: Register, value: i32) -> Cond {
-        Cond::Range(reg, value, value)
+        Self::new(reg, Interval::Bounded(value, value))
     }
 
     pub fn lt(reg: Register, value: i32) -> Cond {
-        Cond::Max(reg, value - 1)
+        Self::new(reg, Interval::Max(value - 1))
     }
 
     pub fn le(reg: Register, value: i32) -> Cond {
-        Cond::Max(reg, value)
+        Self::new(reg, Interval::Max(value))
     }
 
     pub fn gt(reg: Register, value: i32) -> Cond {
-        Cond::Min(reg, value + 1)
+        Self::new(reg, Interval::Min(value + 1))
     }
 
     pub fn ge(reg: Register, value: i32) -> Cond {
-        Cond::Min(reg, value)
-    }
-
-    pub fn reg<'a>(&'a self) -> &'a Register {
-        match *self {
-            Cond::Min(ref r, _) |
-            Cond::Max(ref r, _) |
-            Cond::Range(ref r, _, _) => &r
-        }
-    }
-
-    pub fn reg_mut<'a>(&'a mut self) -> &'a mut Register {
-        match *self {
-            Cond::Min(ref mut r, _) |
-            Cond::Max(ref mut r, _) |
-            Cond::Range(ref mut r, _, _) => r
-        }
-    }
-
-    pub fn min(&self) -> Option<i32> {
-        match *self {
-            Cond::Min(_, min) | Cond::Range(_, min, _) => Some(min),
-            Cond::Max(_, _) => None,
-        }
-    }
-
-    pub fn max(&self) -> Option<i32> {
-        match *self {
-            Cond::Max(_, max) | Cond::Range(_, _, max) => Some(max),
-            Cond::Min(_, _) => None,
-        }
+        Self::new(reg, Interval::Min(value))
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     LdrRR(Register, Register),
     LdrhRR(Register, Register),
@@ -100,17 +66,17 @@ pub enum Op {
 
     AddRR(Register, Register),
     AddRI(Register, i32),
-    AddRX(Register, String, String, Register),
-    AddXI(String, String, i32, Register),
-    AddXR(String, String, Register, Register),
-    AddXX(String, String, String, String, Register),
+    AddRX(Register, Target, Objective, Register),
+    AddXI(Target, Objective, i32, Register),
+    AddXR(Target, Objective, Register, Register),
+    AddXX(Target, Objective, Target, Objective, Register),
 
     SubRR(Register, Register),
     SubRI(Register, i32),
-    SubRX(Register, String, String, Register),
-    SubXI(String, String, i32, Register),
-    SubXR(String, String, Register, Register),
-    SubXX(String, String, String, String, Register),
+    SubRX(Register, Target, Objective, Register),
+    SubXI(Target, Objective, i32, Register),
+    SubXR(Target, Objective, Register, Register),
+    SubXX(Target, Objective, Target, Objective, Register),
 
     And(Register, Register),
     Orr(Register, Register),
@@ -125,28 +91,28 @@ pub enum Op {
 
     MovRR(Register, Register),
     MovRI(Register, i32),
-    MovRX(Register, String, String),
-    MovXR(String, String, Register, Register),
-    MovXI(String, String, i32, Register),
-    MovXX(String, String, String, String, Register),
+    MovRX(Register, Target, Objective),
+    MovXR(Target, Objective, Register, Register),
+    MovXI(Target, Objective, i32, Register),
+    MovXX(Target, Objective, Target, Objective, Register),
 
     MulRR(Register, Register),
-    MulRX(Register, String, String, Register),
-    MulXR(String, String, Register, Register),
+    MulRX(Register, Target, Objective, Register),
+    MulXR(Target, Objective, Register, Register),
 
     SdivRR(Register, Register),
-    SdivRX(Register, String, String, Register),
-    SdivXR(String, String, Register, Register),
+    SdivRX(Register, Target, Objective, Register),
+    SdivXR(Target, Objective, Register, Register),
     UdivRR(Register, Register),
-    UdivRX(Register, String, String, Register),
-    UdivXR(String, String, Register, Register),
+    UdivRX(Register, Target, Objective, Register),
+    UdivXR(Target, Objective, Register, Register),
 
     SremRR(Register, Register),
-    SremRX(Register, String, String, Register),
-    SremXR(String, String, Register, Register),
+    SremRX(Register, Target, Objective, Register),
+    SremXR(Target, Objective, Register, Register),
     UremRR(Register, Register),
-    UremRX(Register, String, String, Register),
-    UremXR(String, String, Register, Register),
+    UremRX(Register, Target, Objective, Register),
+    UremXR(Target, Objective, Register, Register),
 
     Srng(Register, Register, Option<i32>, Option<i32>),
     Urng(Register, Register, Option<u32>, Option<u32>),

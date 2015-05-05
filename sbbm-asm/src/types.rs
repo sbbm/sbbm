@@ -27,6 +27,45 @@ impl fmt::Display for AbsRel {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Interval<T : PartialOrd> {
+    Min(T),
+    Max(T),
+    Bounded(T, T),
+}
+
+impl<T : PartialOrd> Interval<T> {
+    // TODO: Return Result<Interval, {SomeErrorType}> instead of Option<Interval>
+    pub fn new(min: Option<T>, max: Option<T>) -> Option<Interval<T>> {
+        use self::Interval::*;
+
+        match (min, max) {
+            (Some(min), Some(max)) => Some(Bounded(min, max)),
+            (Some(min), None) => Some(Min(min)),
+            (None, Some(max)) => Some(Max(max)),
+            (None, None) => None,
+        }
+    }
+
+    pub fn min(&self) -> Option<&T> {
+        use self::Interval::*;
+
+        match *self {
+            Min(ref min) | Bounded(ref min, _) => Some(min),
+            Max(_) => None,
+        }
+    }
+
+    pub fn max(&self) -> Option<&T> {
+        use self::Interval::*;
+
+        match *self {
+            Max(ref max) | Bounded(_, ref max) => Some(max),
+            Min(_) => None,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Pos3 {
     pub x: AbsRel,
     pub y: AbsRel,
