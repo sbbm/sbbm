@@ -149,11 +149,23 @@ pub enum Extent {
 
 impl Extent {
     pub fn add(&mut self, v: Vec3) {
+        use self::Extent::*;
+
         *self = match *self {
-            Extent::Empty => Extent::MinMax(v, v),
-            Extent::MinMax(min, max) => {
-                Extent::MinMax(Vec3::min(min, v), Vec3::max(max, v))
-            }
+            Empty => MinMax(v, v),
+            MinMax(min, max) => MinMax(Vec3::min(min, v), Vec3::max(max, v)),
         };
+    }
+
+    pub fn union(&mut self, extent: &Extent) {
+        use self::Extent::*;
+
+        match (*self, *extent) {
+            (Empty, MinMax(_, _)) => { *self = *extent; }
+            (MinMax(min_a, max_a), MinMax(min_b, max_b)) => {
+                *self = MinMax(Vec3::min(min_a, min_b), Vec3::max(max_a, max_b));
+            }
+            _ => { }
+        }
     }
 }

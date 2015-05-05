@@ -483,6 +483,13 @@ impl fmt::Display for PlayerCmd {
                 }
                 Ok(())
             }
+            Add(ref tgt, ref obj, ref count, ref data_tag) => {
+                try!(write!(f, "add {} {} {}", tgt, obj, count));
+                if let Some(ref data_tag) = *data_tag {
+                    try!(write!(f, " {}", data_tag));
+                }
+                Ok(())
+            }
             Remove(ref tgt, ref obj, ref count, ref data_tag) => {
                 try!(write!(f, "remove {} {} {}", tgt, obj, count));
                 if let Some(ref data_tag) = *data_tag {

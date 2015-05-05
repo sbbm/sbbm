@@ -5,7 +5,8 @@ SCRIPT_DIR=`pwd`
 popd > /dev/null
 
 SERVER_DIR="$SCRIPT_DIR/server"
-MINECRAFT_JAR="$SERVER_DIR/minecraft_server.1.8.4.jar"
+MINECRAFT_JAR="$SERVER_DIR/minecraft_server.1.8.3.jar"
+JAVA_OPTS="-Xms1G -Xmx1G"
 
 Main()
 {
@@ -16,25 +17,35 @@ Main()
     cp server.properties.in server.properties
 
     export INPUT="$SERVER_DIR/input"
+    export REAL_INPUT="$SERVER_DIR/input_"
     export OUTPUT="$SERVER_DIR/output"
     export CAPTURE="$SERVER_DIR/capture"
 
-    rm -f "$INPUT" "$OUTPUT" "$CAPTURE" || exit 1
-    mkfifo "$INPUT" "$OUTPUT" || exit 1
+    rm -f "$INPUT" "$REAL_INPUT" "$OUTPUT" "$CAPTURE" || exit 1
+    mkfifo "$INPUT" "$REAL_INPUT" "$OUTPUT" || exit 1
 
     trap CleanUp HUP INT TERM
 
-    java -Xms1G -Xmx1G -jar "$MINECRAFT_JAR" nogui <> "$INPUT" | Listen
+    ListenIn <> "$INPUT" &
+    java $JAVA_OPTS -jar "$MINECRAFT_JAR" nogui <> "$REAL_INPUT" | ListenOut
 
     CleanUp
 }
 
 CleanUp()
 {
-    rm -f "$INPUT" "$OUTPUT" "$CAPTURE"
+    rm -f "$INPUT" "$REAL_INPUT" "$OUTPUT" "$CAPTURE"
 }
 
-Listen()
+ListenIn()
+{
+    while read line; do
+        echo "INPUT: $line"
+        echo "$line" >> "$REAL_INPUT"
+    done
+}
+
+ListenOut()
 {
     while read line; do
         if [ -f "$CAPTURE" ]; then

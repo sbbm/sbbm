@@ -52,13 +52,13 @@ fn main() {
         let assembler = Assembler::new(stmts.into_iter());
         let motion = LinearMotion::new(Vec3::new(27, 57, 0));
         //let motion = PackedMotion::new(Vec3::new(27, 57, 0));
-        let layout = Layout::new(motion, assembler);
+        let mut layout = Layout::new(motion, assembler);
 
         output.exec(&Command::Fill(
             Pos3::abs(26, 56, 0), Pos3::abs(60, 67, 32),
             "minecraft:air".to_string(), None, None, None)).unwrap();
         init_computer(&mut output).unwrap();
-        for (pos, block) in layout {
+        for (pos, block) in &mut layout {
             output.exec(&Command::SetBlock(
                 pos.as_abs(), block.id, None, None,
                 Some(Nbt::Compound(block.nbt)))).unwrap();

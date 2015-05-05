@@ -151,6 +151,10 @@ impl<Motion, Source> Layout<Motion, Source>
         }
     }
 
+    pub fn get_power_extent(&self, label: &str) -> Option<Extent> {
+        self.complete_extents.get(label).map(|e| *e)
+    }
+
     fn update_active_extents(&mut self) {
         let power_pos = self.motion.power_pos();
         for (_, extent) in self.active_extents.iter_mut() {
@@ -212,7 +216,6 @@ impl<Motion, Source> Layout<Motion, Source>
         }
 
         self.resolve_pending();
-
         self.motion.terminate();
     }
 
@@ -226,7 +229,11 @@ impl<Motion, Source> Layout<Motion, Source>
     }
 }
 
-impl<Motion, Source> Iterator for Layout<Motion, Source>
+// FIXME: Come up with a better idiom here.  It's nice to leave Layout alive
+// after iteration so get_power_extent can be used, but having to do:
+//     for .. in &mut layout { }
+// is awkward.
+impl<'a, Motion, Source> Iterator for &'a mut Layout<Motion, Source>
     where Motion : LayoutMotion,
           Source : Iterator<Item=AssembledItem> {
     type Item = (Vec3, Block);
