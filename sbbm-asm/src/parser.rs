@@ -211,6 +211,8 @@ impl<'a> Parser<'a> {
                     m @ "mul" => self.parse_instr_rr(m, MulRR),
                     m @ "sdiv" => self.parse_instr_rr(m, SdivRR),
                     m @ "udiv" => self.parse_instr_rr(m, UdivRR),
+                    m @ "srem" => self.parse_instr_rr(m, SremRR),
+                    m @ "urem" => self.parse_instr_rr(m, UremRR),
                     m @ "srng" => self.parse_rng::<_, i32>(m, Srng),
                     m @ "urng" => self.parse_rng::<_, u32>(m, Urng),
                     m @ "b" => self.parse_branch(m, BrR, BrL),

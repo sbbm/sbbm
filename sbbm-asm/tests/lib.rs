@@ -8,7 +8,7 @@ extern crate regex;
 use regex::Regex;
 use sbbm_asm::assembler::Assembler;
 use sbbm_asm::commands::{
-    Command, Objective, Selector, SelectorName, Target, players};
+    Command, Selector, SelectorName, Target, players};
 use sbbm_asm::layout::{Layout, LinearMotion};
 use sbbm_asm::lexer::Lexer;
 use sbbm_asm::nbt::Nbt;
@@ -78,8 +78,8 @@ fn exec(cmd: &Command) -> io::Result<String> {
 static SET_REGEX : Regex = regex!(
     r"Set score of (\w+) for player .+ to (-?\d+)");
 
-fn get(target: &Target, obj: Objective) -> io::Result<i32> {
-    let resp = try!(exec(&players::add(target.clone(), obj, 0, None)));
+fn get(target: &Target, obj: &str) -> io::Result<i32> {
+    let resp = try!(exec(&players::add(target.clone(), obj.to_string(), 0, None)));
 
     if let Some(cap) = SET_REGEX.captures(&resp[..]) {
         // TODO: Verify that the objectives match.
@@ -133,9 +133,9 @@ fn computer_target() -> Target {
 #[test]
 fn test_constant_regs() {
     let target = computer_target();
-    assert_eq!(i32::MIN, get(&target, "MIN".to_string()).unwrap());
-    assert_eq!(2, get(&target, "TWO".to_string()).unwrap());
-    assert_eq!(0, get(&target, "ZERO".to_string()).unwrap());
+    assert_eq!(i32::MIN, get(&target, "MIN").unwrap());
+    assert_eq!(2, get(&target, "TWO").unwrap());
+    assert_eq!(0, get(&target, "ZERO").unwrap());
 }
 
 #[test]
@@ -147,7 +147,7 @@ mov r1, #37
 add r0, r1");
 
     let target = computer_target();
-    assert_eq!(100 + 37, get(&target, "r0".to_string()).unwrap());
+    assert_eq!(100 + 37, get(&target, "r0").unwrap());
 }
 
 #[test]
@@ -159,7 +159,7 @@ mov r1, #37
 sub r0, r1");
 
     let target = computer_target();
-    assert_eq!(100 - 37, get(&target, "r0".to_string()).unwrap());
+    assert_eq!(100 - 37, get(&target, "r0").unwrap());
 }
 
 #[test]
@@ -171,7 +171,7 @@ mov r1, #37
 mul r0, r1");
 
     let target = computer_target();
-    assert_eq!(100 * 37, get(&target, "r0".to_string()).unwrap());
+    assert_eq!(100 * 37, get(&target, "r0").unwrap());
 }
 
 
@@ -184,5 +184,17 @@ mov r1, #37
 sdiv r0, r1");
 
     let target = computer_target();
-    assert_eq!(100 / 37, get(&target, "r0".to_string()).unwrap());
+    assert_eq!(100 / 37, get(&target, "r0").unwrap());
+}
+
+#[test]
+fn test_srem() {
+    run_asm("
+main:
+mov r0, #100
+mov r1, #37
+srem r0, r1");
+
+    let target = computer_target();
+    assert_eq!(100 % 37, get(&target, "r0").unwrap());
 }

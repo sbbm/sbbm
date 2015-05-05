@@ -439,6 +439,12 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                     self.make_op_cmd_rr(dst, PlayerOp::Div, src));
                 self.emit(Complete(block));
             }
+            SremRR(dst, src) => {
+                let block = make_cmd_block(
+                    self.selector.clone(), conds,
+                    self.make_op_cmd_rr(dst, PlayerOp::Rem, src));
+                self.emit(Complete(block));
+            }
             Srng(dst, test, min, max) => {
                 let mut one_conds = conds.clone();
                 if let Some(interval) = Interval::new(min, max) {
