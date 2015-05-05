@@ -1,7 +1,7 @@
 use ast::{Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
-use commands::{self, Objective, Target};
+use commands::{Objective, Target};
 use lexer::{Lexer, SpannedToken, Token};
 use lexer::Token::*;
 use types::Interval;

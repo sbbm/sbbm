@@ -1,29 +1,17 @@
-#![feature(core, plugin)]
-#![plugin(regex_macros)]
-
 extern crate docopt;
-extern crate regex;
 extern crate rustc_serialize;
+extern crate sbbm_asm;
 
-mod assembler;
-mod ast;
-mod commands;
-mod types;
-mod layout;
-mod lexer;
-mod nbt;
-mod parser;
-
-use assembler::Assembler;
-use commands::{
+use sbbm_asm::assembler::Assembler;
+use sbbm_asm::commands::{
     Command, Selector, SelectorName, SelectorTeam, Target,
     objectives, players, teams};
 use docopt::Docopt;
-use layout::{Layout, LinearMotion};
-use lexer::Lexer;
-use nbt::{Nbt, NbtCompound};
-use parser::Parser;
-use types::{Pos3, Vec3};
+use sbbm_asm::layout::{Layout, LinearMotion};
+use sbbm_asm::lexer::Lexer;
+use sbbm_asm::nbt::{Nbt, NbtCompound};
+use sbbm_asm::parser::Parser;
+use sbbm_asm::types::{Pos3, Vec3};
 
 use std::fs::File;
 use std::io::{self, Read, Write};

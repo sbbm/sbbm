@@ -205,7 +205,6 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     }
 
     fn raw_shift_right(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
-        let bit_num = self.obj_bit_num.clone();
         let tmp1 = self.obj_bit_tmp1.clone();
         let mut lt_zero_conds = conds.clone();
         lt_zero_conds.push(Cond::lt(dst.clone(), 0));
