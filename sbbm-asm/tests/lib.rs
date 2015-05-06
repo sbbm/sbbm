@@ -23,63 +23,48 @@ use std::path::PathBuf;
 use std::sync::{StaticMutex, MUTEX_INIT};
 
 static SERVER_MUTEX: StaticMutex = MUTEX_INIT;
-static CIRCUIT_MUTEX: StaticMutex = MUTEX_INIT;
+static SET_REGEX: Regex = regex!(
+    r"Set score of (\w+) for player .+ to (-?\d+)");
 
-// NOTE: This requires /gamerule logAdminCommands false
-// Probably some other things are also required.  I need a server init script.
-fn exec(cmd: &Command) -> io::Result<String> {
-    // FIXME: Eliminate all unwrap to prevent poisoning the mutex.
-    let _g = SERVER_MUTEX.lock().unwrap();
+macro_rules! lock_server {
+    () => { let _g = SERVER_MUTEX.lock().unwrap(); }
+}
 
-    // TODO: verify that server/input exists
-    let cargo_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+fn server_path() -> PathBuf {
+    let mut p = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    p.push("..");
+    p.push("server");
+    p
+}
 
-    let server_path = {
-        let mut p = cargo_path.clone();
-        p.push("..");
-        p.push("server");
-        p
-    };
-    let capture_path = {
-        let mut p = server_path.clone();
-        p.push("capture");
-        p
-    };
-
-    File::create(capture_path.clone()).unwrap();
-
+fn write(cmd: &Command) -> io::Result<()> {
     let input_path = {
-        let mut p = server_path.clone();
+        let mut p = server_path();
         p.push("input");
         p
     };
 
-    let output_path = {
-        let mut p = server_path.clone();
-        p.push("output");
-        p
-    };
-
-    let mut f = OpenOptions::new().write(true).append(true).open(input_path).unwrap();
-    write!(f, "{}\n", cmd).unwrap();
-    //f.sync_all().unwrap();
-
-    // FIXME: handle errors, good god man.
-    let out = File::open(output_path).unwrap();
-    let mut out = BufReader::new(out);
-    // FIXME: eeeerrroors
-    let mut result = String::new();
-    out.read_line(&mut result).unwrap();
-
-    fs::remove_file(capture_path).unwrap();
-    Ok(result)
+    let mut f = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(input_path)
+        .unwrap();
+    write!(f, "{}\n", cmd)
 }
 
-static SET_REGEX : Regex = regex!(
-    r"Set score of (\w+) for player .+ to (-?\d+)");
+// NOTE: This requires "/gamerule logAdminCommands false"
+// Probably some other things are also required.  I need a server init script.
+fn exec(cmd: &Command) -> io::Result<String> {
+    // FIXME: Eliminate all unwrap to prevent poisoning the mutex.
+    let (_, output) = capture_until(|_| true, || {
+        write(cmd).unwrap();
+    });
+    Ok(output)
+}
 
 fn get(target: &Target, obj: &str) -> io::Result<i32> {
-    let resp = try!(exec(&players::add(target.clone(), obj.to_string(), 0, None)));
+    let resp = try!(exec(
+        &players::add(target.clone(), obj.to_string(), 0, None)));
 
     if let Some(cap) = SET_REGEX.captures(&resp[..]) {
         // TODO: Verify that the objectives match.
@@ -90,37 +75,100 @@ fn get(target: &Target, obj: &str) -> io::Result<i32> {
     }
 }
 
-fn run_asm(input: &str) {
-    let _g = CIRCUIT_MUTEX.lock().unwrap();
+fn capture_until<F, P, T>(p: P, f: F) -> (T, String)
+    where F : Fn() -> T,
+          P : Fn(&str) -> bool
+{
+    // FIXME: Eliminate all panics, return some kind of Result<>
 
+    // Begin capturing
+    let capture_path = {
+        let mut p = server_path();
+        p.push("capture");
+        p
+    };
+
+    File::create(capture_path.clone()).unwrap();
+
+    let res = f();
+
+    // Capture output and wait for p to return true.
+    let output_path = {
+        let mut p = server_path();
+        p.push("output");
+        p
+    };
+
+    // FIXME: handle errors, good god man.
+    let out = File::open(output_path).unwrap();
+    let mut out = BufReader::new(out);
+    // FIXME: eeeerrroors
+    let mut captured = String::new();
+    loop {
+        let start = captured.len();
+        out.read_line(&mut captured).unwrap();
+        if p(&captured[start..]) { break; }
+    }
+
+    fs::remove_file(capture_path).unwrap();
+    (res, captured)
+}
+
+fn capture<F, T>(f: F) -> (T, String) where F : Fn() -> T {
+    let (result, mut output) = capture_until(|s| s.contains("DONEDONEDONE"), || {
+        let result = f();
+        write(&Command::Say("DONEDONEDONE".to_string())).unwrap();
+        result
+    });
+
+    // Remove the marker line from output.
+    let mut count = 0;
+    match output.rfind(|c| if c == '\n' { count += 1; count > 1 } else { false }) {
+        Some(index) => output.truncate(index + 1),
+        None => output.truncate(0),
+    }
+
+    (result, output)
+}
+
+fn run_asm(input: &str) {
     // FIXME: Eliminate all unwrap to prevent poisoning the mutex.
 
-    let mut parser = Parser::new(Lexer::new(input));
-    let assembler = Assembler::new(parser.parse_program().into_iter());
-    let motion = LinearMotion::new(Vec3::new(0, 57, 0));
-    let mut layout = Layout::new(motion, assembler);
+    // TODO: Chain an assembled item that executes a 'say' marker command, and
+    // use capture_until to wait for that marker to provide more reliable
+    // testing of multi-stage assembled programs.
+    let (dirty_extent, _) = capture(|| {
+        let mut parser = Parser::new(Lexer::new(input));
+        let assembler = Assembler::new(parser.parse_program().into_iter());
+        let motion = LinearMotion::new(Vec3::new(0, 57, 0));
+        let mut layout = Layout::new(motion, assembler);
 
-    let mut dirty_extent = Extent::Empty;
-    for (pos, block) in &mut layout {
-        dirty_extent.add(pos);
-        exec(&Command::SetBlock(
-            pos.as_abs(), block.id, None, None,
-            Some(Nbt::Compound(block.nbt)))).unwrap();
-    }
+        let mut dirty_extent = Extent::Empty;
+        for (pos, block) in &mut layout {
+            dirty_extent.add(pos);
+            write(&Command::SetBlock(
+                pos.as_abs(), block.id, None, None,
+                Some(Nbt::Compound(block.nbt)))).unwrap();
+        }
 
-    if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
-        dirty_extent.add(min);
-        dirty_extent.add(max);
-        exec(&Command::Fill(
-            min.as_abs(), max.as_abs(), "minecraft:redstone_block".to_string(),
-            None, None, None)).unwrap();
-    }
+        if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
+            dirty_extent.add(min);
+            dirty_extent.add(max);
+            write(&Command::Fill(
+                min.as_abs(), max.as_abs(), "minecraft:redstone_block".to_string(),
+                None, None, None)).unwrap();
+        }
 
-    if let Extent::MinMax(min, max) = dirty_extent {
-        exec(&Command::Fill(
-            min.as_abs(), max.as_abs(), "minecraft:air".to_string(),
-            None, None, None)).unwrap();
-    }
+        dirty_extent
+    });
+
+    capture(|| {
+        if let Extent::MinMax(min, max) = dirty_extent {
+            write(&Command::Fill(
+                min.as_abs(), max.as_abs(), "minecraft:air".to_string(),
+                None, None, None)).unwrap();
+        }
+    });
 }
 
 fn computer_target() -> Target {
@@ -132,6 +180,8 @@ fn computer_target() -> Target {
 
 #[test]
 fn test_constant_regs() {
+    lock_server!();
+
     let target = computer_target();
     assert_eq!(i32::MIN, get(&target, "MIN").unwrap());
     assert_eq!(2, get(&target, "TWO").unwrap());
@@ -140,6 +190,8 @@ fn test_constant_regs() {
 
 #[test]
 fn test_add() {
+    lock_server!();
+
     run_asm("
 main:
 mov r0, #100
@@ -152,6 +204,8 @@ add r0, r1");
 
 #[test]
 fn test_sub() {
+    lock_server!();
+
     run_asm("
 main:
 mov r0, #100
@@ -164,6 +218,8 @@ sub r0, r1");
 
 #[test]
 fn test_mul() {
+    lock_server!();
+
     run_asm("
 main:
 mov r0, #100
@@ -177,6 +233,8 @@ mul r0, r1");
 
 #[test]
 fn test_sdiv() {
+    lock_server!();
+
     run_asm("
 main:
 mov r0, #100
@@ -189,6 +247,8 @@ sdiv r0, r1");
 
 #[test]
 fn test_srem() {
+    lock_server!();
+
     run_asm("
 main:
 mov r0, #100
@@ -197,4 +257,117 @@ srem r0, r1");
 
     let target = computer_target();
     assert_eq!(100 % 37, get(&target, "r0").unwrap());
+}
+
+#[test]
+fn test_and() {
+    lock_server!();
+
+    run_asm("
+main:
+mov r0, #100
+mov r1, #37
+and r0, r1");
+
+    let target = computer_target();
+    assert_eq!(100 & 37, get(&target, "r0").unwrap());
+}
+
+#[test]
+fn test_orr() {
+    lock_server!();
+
+    run_asm("
+main:
+mov r0, #100
+mov r1, #37
+orr r0, r1");
+
+    let target = computer_target();
+    assert_eq!(100 | 37, get(&target, "r0").unwrap());
+}
+
+#[test]
+fn test_eor() {
+    lock_server!();
+
+    run_asm("
+main:
+mov r0, #100
+mov r1, #37
+eor r0, r1");
+
+    let target = computer_target();
+    assert_eq!(100 ^ 37, get(&target, "r0").unwrap());
+}
+
+#[test]
+fn test_asr() {
+    lock_server!();
+
+    let values = [
+        i32::MIN, -1234568, -1234567, -3, -2, -1,
+        0, 1, 2, 3, 1234567, 1234568, i32::MAX];
+    let amounts = [0, 1, 2, 30, 31];
+
+    let target = computer_target();
+    for value in values.iter() {
+        for amount in amounts.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+asr r0, r1", value, amount)[..]);
+
+            assert_eq!(value >> amount, get(&target, "r0").unwrap());
+        }
+    }
+}
+
+#[test]
+fn test_lsr() {
+    lock_server!();
+
+    let values = [
+        i32::MIN, -1234568, -1234567, -3, -2, -1,
+        0, 1, 2, 3, 1234567, 1234568, i32::MAX];
+    let amounts = [0, 1, 2, 30, 31];
+
+    let target = computer_target();
+    for value in values.iter() {
+        for amount in amounts.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+lsr r0, r1", value, amount)[..]);
+
+            assert_eq!(
+                ((*value as u32) >> amount) as i32,
+                get(&target, "r0").unwrap());
+        }
+    }
+}
+
+#[test]
+fn test_lsl() {
+    lock_server!();
+
+    let values = [
+        i32::MIN, -1234568, -1234567, -3, -2, -1,
+        0, 1, 2, 3, 1234567, 1234568, i32::MAX];
+    let amounts = [0, 1, 2, 30, 31];
+
+    let target = computer_target();
+    for value in values.iter() {
+        for amount in amounts.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+lsl r0, r1", value, amount)[..]);
+
+            assert_eq!(value << amount, get(&target, "r0").unwrap());
+        }
+    }
 }

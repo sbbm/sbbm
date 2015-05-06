@@ -390,7 +390,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                     team: Some(SelectorTeam::On(self.team_bit.clone())),
                     scores: {
                         let mut s = HashMap::new();
-                        s.insert(tmp1, Interval::Min(-1));
+                        s.insert(tmp1, Interval::Min(0));
                         s },
                     ..Selector::entity()
                 });
