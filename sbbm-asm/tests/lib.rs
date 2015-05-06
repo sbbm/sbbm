@@ -263,42 +263,66 @@ srem r0, r1");
 fn test_and() {
     lock_server!();
 
-    run_asm("
-main:
-mov r0, #100
-mov r1, #37
-and r0, r1");
-
     let target = computer_target();
-    assert_eq!(100 & 37, get(&target, "r0").unwrap());
+    let values = [
+        i32::MIN, -1234568, -1234567, -1,
+        0, 1, 1234567, 1234568, i32::MAX];
+
+    for left in values.iter() {
+        for right in values.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+and r0, r1", left, right)[..]);
+
+            assert_eq!(left & right, get(&target, "r0").unwrap());
+        }
+    }
 }
 
 #[test]
 fn test_orr() {
     lock_server!();
 
-    run_asm("
-main:
-mov r0, #100
-mov r1, #37
-orr r0, r1");
-
     let target = computer_target();
-    assert_eq!(100 | 37, get(&target, "r0").unwrap());
+    let values = [
+        i32::MIN, -1234568, -1234567, -1,
+        0, 1, 1234567, 1234568, i32::MAX];
+
+    for left in values.iter() {
+        for right in values.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+orr r0, r1", left, right)[..]);
+
+            assert_eq!(left | right, get(&target, "r0").unwrap());
+        }
+    }
 }
 
 #[test]
 fn test_eor() {
     lock_server!();
 
-    run_asm("
-main:
-mov r0, #100
-mov r1, #37
-eor r0, r1");
-
     let target = computer_target();
-    assert_eq!(100 ^ 37, get(&target, "r0").unwrap());
+    let values = [
+        i32::MIN, -1234568, -1234567, -1,
+        0, 1, 1234567, 1234568, i32::MAX];
+
+    for left in values.iter() {
+        for right in values.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+eor r0, r1", left, right)[..]);
+
+            assert_eq!(left ^ right, get(&target, "r0").unwrap());
+        }
+    }
 }
 
 #[test]

@@ -125,6 +125,11 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
     fn expand_bits(&mut self, conds: Vec<Cond>, reg: Register, bit_obj: Objective) {
         let tgt_all = self.tgt_bit_all.clone();
+        let lt_zero_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(reg.clone(), 0));
+            c
+        };
 
         // Set all bit entities' bit_obj to the value to be expanded, reg.
         // Like this: [11, 11, 11, 11]
@@ -132,6 +137,14 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             self.selector.clone(), conds.clone(),
             self.make_op_cmd_xr(
                 tgt_all.clone(), bit_obj.clone(), PlayerOp::Asn, reg.clone()));
+        self.emit(Complete(block));
+
+        // If reg is negative, flip the sign of all temp values. This causes the
+        // high bit to always end up zero, so that is handled later.
+        let min_reg = Register::Spec(self.obj_min.clone());
+        let block = make_cmd_block(
+            self.selector.clone(), lt_zero_conds.clone(), self.make_op_cmd_xr(
+                tgt_all.clone(), bit_obj.clone(), PlayerOp::Sub, min_reg));
         self.emit(Complete(block));
 
         // Divide all bit entities' bit_obj by their bit component.
@@ -146,6 +159,20 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             self.selector.clone(), conds, players::rem_op(
                 tgt_all, bit_obj.clone(),
                 self.target.clone(), self.obj_two.clone()));
+        self.emit(Complete(block));
+
+        // If reg is negative, set the high bit to one.
+        let tgt_high = Target::Sel(Selector {
+            team: Some(SelectorTeam::On(self.team_bit.clone())),
+            scores: {
+                let mut s = HashMap::new();
+                s.insert(self.obj_bit_num.clone(), Interval::Bounded(31, 31));
+                s },
+            ..Selector::entity()
+        });
+        let block = make_cmd_block(
+            self.selector.clone(), lt_zero_conds.clone(),
+            players::set(tgt_high, bit_obj, 1, None));
         self.emit(Complete(block));
     }
 
