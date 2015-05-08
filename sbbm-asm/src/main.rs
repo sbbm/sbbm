@@ -115,6 +115,15 @@ fn init_registers(conn: &mut MinecraftConn, comp_tgt: Target) -> io::Result<()> 
         try!(conn.exec(&players::set(comp_tgt.clone(), obj, 0, None)));
     }
 
+    // Temp registers (implementation details)
+    for i in (0..4) {
+        let obj = format!("t{}", i);
+
+        try!(conn.exec(&objectives::remove(obj.clone())));
+        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.exec(&players::set(comp_tgt.clone(), obj, 0, None)));
+    }
+
     // Special registers (implementation details)
     for name in ["ZERO", "TWO", "MIN", "TEST"].iter() {
         let obj = name.to_string();
@@ -129,7 +138,7 @@ fn init_registers(conn: &mut MinecraftConn, comp_tgt: Target) -> io::Result<()> 
 }
 
 fn init_bitwise(conn: &mut MinecraftConn) -> io::Result<()> {
-    for obj in ["BitComponent", "BitNumber", "BitTmp1", "BitTmp2", "BitTmp3"].iter() {
+    for obj in ["BitComponent", "BitNumber", "t0", "t1", "t2"].iter() {
         try!(conn.exec(&objectives::remove(obj.to_string())));
         try!(conn.exec(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
     }

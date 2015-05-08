@@ -49,11 +49,11 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     team_bit: Team,
     tgt_bit_all: Target,
     tgt_bit_one: Target,
-    obj_bit_tmp1: Objective,
-    obj_bit_tmp2: Objective,
-    obj_bit_tmp3: Objective,
     obj_bit_comp: Objective,
     obj_bit_num: Objective,
+    obj_tmp0: Objective,
+    obj_tmp1: Objective,
+    obj_tmp2: Objective,
     obj_two: Objective,
     obj_min: Objective,
 }
@@ -86,12 +86,11 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 team: Some(SelectorTeam::On(team_bit.to_string())),
                 count: Some(1),
                 ..Selector::entity() }),
-            // TODO: Rename BitTmp1,2,3 to t0, t1, t2, and obj_bit_tmp => obj_tmp
-            obj_bit_tmp1: "BitTmp1".to_string(),
-            obj_bit_tmp2: "BitTmp2".to_string(),
-            obj_bit_tmp3: "BitTmp3".to_string(),
             obj_bit_comp: "BitComponent".to_string(),
             obj_bit_num: "BitNumber".to_string(),
+            obj_tmp0: "t0".to_string(),
+            obj_tmp1: "t1".to_string(),
+            obj_tmp2: "t2".to_string(),
             obj_two: "TWO".to_string(),
             obj_min: "MIN".to_string(),
         }
@@ -214,45 +213,45 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
     fn activate_bitwise_entities(&mut self, conds: Vec<Cond>, amount: Register) {
         let bit_num = self.obj_bit_num.clone();
-        let tmp1 = self.obj_bit_tmp1.clone();
+        let tmp0 = self.obj_tmp0.clone();
 
-        // SIMD copy bitwise entities' BitNumber to tmp1
+        // SIMD copy bitwise entities' BitNumber to tmp0
         self.bit_vec_op(
-            conds.clone(), tmp1.clone(), PlayerOp::Asn, bit_num);
+            conds.clone(), tmp0.clone(), PlayerOp::Asn, bit_num);
 
-        // Vector-scalar remove 32 from bitwise entities' tmp1
+        // Vector-scalar remove 32 from bitwise entities' tmp0
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::remove(self.tgt_bit_all.clone(), tmp1.clone(), 32, None));
+            players::remove(self.tgt_bit_all.clone(), tmp0.clone(), 32, None));
         self.emit(Complete(block));
 
-        // Vector-scalar add shift amount to bitwise entities' tmp1.
+        // Vector-scalar add shift amount to bitwise entities' tmp0.
         // This makes all active shifters greater than or equal to zero.
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), self.make_op_cmd_xr(
-                self.tgt_bit_all.clone(), tmp1.clone(), PlayerOp::Add, amount));
+                self.tgt_bit_all.clone(), tmp0.clone(), PlayerOp::Add, amount));
         self.emit(Complete(block));
     }
 
     fn raw_shift_right(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
-        let tmp1 = self.obj_bit_tmp1.clone();
+        let tmp0 = self.obj_tmp0.clone();
         let mut lt_zero_conds = conds.clone();
         lt_zero_conds.push(Cond::lt(dst.clone(), 0));
 
-        let tmp1_reg = Register::Spec(tmp1.clone());
+        let t0 = Register::Spec(tmp0.clone());
         let two_reg = Register::Spec(self.obj_two.clone());
         let min_reg = Register::Spec(self.obj_min.clone());
 
-        // Copy to tmp1
+        // Copy to t0
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), self.make_op_cmd_rr(
-                tmp1_reg.clone(), PlayerOp::Asn, dst.clone()));
+                t0.clone(), PlayerOp::Asn, dst.clone()));
         self.emit(Complete(block));
 
-        // if dst < 0, tmp1 -= i32::MIN
+        // if dst < 0, t0 -= i32::MIN
         let block = make_cmd_block(
             self.selector.clone(), lt_zero_conds.clone(),
-            self.make_op_cmd_rr(tmp1_reg.clone(), PlayerOp::Sub, min_reg));
+            self.make_op_cmd_rr(t0.clone(), PlayerOp::Sub, min_reg));
         self.emit(Complete(block));
 
         self.activate_bitwise_entities(conds.clone(), src);
@@ -261,16 +260,16 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             team: Some(SelectorTeam::On(self.team_bit.clone())),
             scores: {
                 let mut s = HashMap::new();
-                s.insert(tmp1, Interval::Min(0));
+                s.insert(tmp0, Interval::Min(0));
                 s },
             ..Selector::entity()
         });
-        // execute-in-bitwise-entities: divide computer tmp1 by TWO if entity tmp1 > 0
+        // execute-in-bitwise-entities: divide computer tmp0 by TWO if entity tmp0 > 0
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), Execute(
                 active_bit_tgt, REL_ZERO,
                 Box::new(self.make_op_cmd_rr(
-                    tmp1_reg.clone(), PlayerOp::Div, two_reg))));
+                    t0.clone(), PlayerOp::Div, two_reg))));
         self.emit(Complete(block));
     }
 
@@ -303,9 +302,9 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     }
 
     fn emit_udiv(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
-        let t0 = Register::Spec(self.obj_bit_tmp1.clone());
-        let t1 = Register::Spec(self.obj_bit_tmp2.clone());
-        let t2 = Register::Spec(self.obj_bit_tmp3.clone());
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        let t1 = Register::Spec(self.obj_tmp1.clone());
+        let t2 = Register::Spec(self.obj_tmp2.clone());
         let min_reg = Register::Spec(self.obj_min.clone());
         let two_reg = Register::Spec(self.obj_two.clone());
 
@@ -399,75 +398,75 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             And(dst, src) => {
                 self.uses_bitwise = true;
 
-                let tmp1 = self.obj_bit_tmp1.clone();
-                let tmp2 = self.obj_bit_tmp2.clone();
+                let tmp0 = self.obj_tmp0.clone();
+                let tmp1 = self.obj_tmp1.clone();
 
-                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
-                self.expand_bits(conds.clone(), src, tmp2.clone());
+                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
+                self.expand_bits(conds.clone(), src, tmp1.clone());
                 // 'and' the bits together.
-                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Mul, tmp2);
-                self.accum_bits(conds.clone(), dst, tmp1);
+                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Mul, tmp1);
+                self.accum_bits(conds.clone(), dst, tmp0);
             }
             Orr(dst, src) => {
                 self.uses_bitwise = true;
 
-                let tmp1 = self.obj_bit_tmp1.clone();
-                let tmp2 = self.obj_bit_tmp2.clone();
+                let tmp0 = self.obj_tmp0.clone();
+                let tmp1 = self.obj_tmp1.clone();
 
-                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
-                self.expand_bits(conds.clone(), src, tmp2.clone());
+                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
+                self.expand_bits(conds.clone(), src, tmp1.clone());
                 // 'orr' the bits together.
-                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Max, tmp2);
-                self.accum_bits(conds.clone(), dst, tmp1);
+                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Max, tmp1);
+                self.accum_bits(conds.clone(), dst, tmp0);
             }
             Eor(dst, src) => {
                 self.uses_bitwise = true;
 
-                let tmp1 = self.obj_bit_tmp1.clone();
-                let tmp2 = self.obj_bit_tmp2.clone();
+                let tmp0 = self.obj_tmp0.clone();
+                let tmp1 = self.obj_tmp1.clone();
 
-                self.expand_bits(conds.clone(), dst.clone(), tmp1.clone());
-                self.expand_bits(conds.clone(), src, tmp2.clone());
+                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
+                self.expand_bits(conds.clone(), src, tmp1.clone());
                 // 'eor' the bits together.
-                self.bit_vec_op(conds.clone(), tmp1.clone(), PlayerOp::Add, tmp2);
+                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Add, tmp1);
                 let block = make_cmd_block(
                     self.selector.clone(), conds.clone(), players::rem_op(
-                        self.tgt_bit_all.clone(), tmp1.clone(),
+                        self.tgt_bit_all.clone(), tmp0.clone(),
                         self.target.clone(), self.obj_two.clone()));
                 self.emit(Complete(block));
-                self.accum_bits(conds.clone(), dst, tmp1);
+                self.accum_bits(conds.clone(), dst, tmp0);
             }
             AsrRR(dst, src) => {
                 self.uses_bitwise = true;
 
                 self.raw_shift_right(conds.clone(), dst.clone(), src);
 
-                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp0 = self.obj_tmp0.clone();
                 let mut lt_zero_conds = conds.clone();
                 lt_zero_conds.push(Cond::lt(dst.clone(), 0));
-                let tmp1_reg = Register::Spec(tmp1.clone());
+                let t0 = Register::Spec(tmp0.clone());
 
                 let sign_bits_tgt = Target::Sel(Selector {
                     team: Some(SelectorTeam::On(self.team_bit.clone())),
                     scores: {
                         let mut s = HashMap::new();
-                        s.insert(tmp1, Interval::Min(-1));
+                        s.insert(tmp0, Interval::Min(-1));
                         s },
                     ..Selector::entity()
                 });
-                // if dst < 0 execute-in-bitwise-entities: computer tmp1 += entity BitComponent
+                // if dst < 0 execute-in-bitwise-entities: computer t0 += entity BitComponent
                 let block = make_cmd_block(
                     self.selector.clone(), lt_zero_conds, Execute(
                         sign_bits_tgt, REL_ZERO,
                         Box::new(self.make_op_cmd_rx(
-                            tmp1_reg.clone(), PlayerOp::Add,
+                            t0.clone(), PlayerOp::Add,
                             self.tgt_bit_one.clone(), self.obj_bit_comp.clone()))));
                 self.emit(Complete(block));
 
-                // copy computer tmp1 to dst
+                // copy computer tmp0 to dst
                 let block = make_cmd_block(
                     self.selector.clone(), conds, self.make_op_cmd_rr(
-                        dst, PlayerOp::Asn, tmp1_reg));
+                        dst, PlayerOp::Asn, t0));
                 self.emit(Complete(block));
             }
             LsrRR(dst, src) => {
@@ -475,31 +474,31 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
                 self.raw_shift_right(conds.clone(), dst.clone(), src);
 
-                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp0 = self.obj_tmp0.clone();
                 let mut lt_zero_conds = conds.clone();
                 lt_zero_conds.push(Cond::lt(dst.clone(), 0));
-                let tmp1_reg = Register::Spec(tmp1.clone());
+                let t0 = Register::Spec(tmp0.clone());
 
                 let high_bit_tgt = Target::Sel(Selector {
                     team: Some(SelectorTeam::On(self.team_bit.clone())),
                     count: Some(1),
                     scores: {
                         let mut s = HashMap::new();
-                        s.insert(tmp1, Interval::Bounded(-1, -1));
+                        s.insert(tmp0, Interval::Bounded(-1, -1));
                         s },
                     ..Selector::entity()
                 });
-                // if dst < 0 computer tmp1 += entity[high-bit] BitComponent
+                // if dst < 0 computer t0 += entity[high-bit] BitComponent
                 let block = make_cmd_block(
                     self.selector.clone(), lt_zero_conds, self.make_op_cmd_rx(
-                        tmp1_reg.clone(), PlayerOp::Add,
+                        t0.clone(), PlayerOp::Add,
                         high_bit_tgt, self.obj_bit_comp.clone()));
                 self.emit(Complete(block));
 
-                // copy computer tmp1 to dst
+                // copy computer tmp0 to dst
                 let block = make_cmd_block(
                     self.selector.clone(), conds, self.make_op_cmd_rr(
-                        dst, PlayerOp::Asn, tmp1_reg));
+                        dst, PlayerOp::Asn, t0));
                 self.emit(Complete(block));
             }
             LslRR(dst, src) => {
@@ -507,14 +506,14 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
                 self.activate_bitwise_entities(conds.clone(), src);
 
-                let tmp1 = self.obj_bit_tmp1.clone();
+                let tmp0 = self.obj_tmp0.clone();
                 let two_reg = Register::Spec(self.obj_two.clone());
 
                 let active_bit_tgt = Target::Sel(Selector {
                     team: Some(SelectorTeam::On(self.team_bit.clone())),
                     scores: {
                         let mut s = HashMap::new();
-                        s.insert(tmp1, Interval::Min(0));
+                        s.insert(tmp0, Interval::Min(0));
                         s },
                     ..Selector::entity()
                 });
