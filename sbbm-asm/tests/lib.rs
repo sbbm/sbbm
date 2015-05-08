@@ -246,6 +246,30 @@ sdiv r0, r1");
 }
 
 #[test]
+fn test_udiv() {
+    lock_server!();
+
+    let target = computer_target();
+    let values = [
+        i32::MIN, -1234568, -1234567, -33, -32, -3, -2, -1,
+        1, 2, 3, 32, 33, 1234567, 1234568, i32::MAX];
+
+    for left in values.iter() {
+        for right in values.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+udiv r0, r1", left, right)[..]);
+
+            assert_eq!(
+                ((*left as u32) / (*right as u32)) as i32,
+                get(&target, "r0").unwrap());
+        }
+    }
+}
+
+#[test]
 fn test_srem() {
     lock_server!();
 

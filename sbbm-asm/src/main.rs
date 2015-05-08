@@ -129,7 +129,7 @@ fn init_registers(conn: &mut MinecraftConn, comp_tgt: Target) -> io::Result<()> 
 }
 
 fn init_bitwise(conn: &mut MinecraftConn) -> io::Result<()> {
-    for obj in ["BitComponent", "BitNumber", "BitTmp1", "BitTmp2"].iter() {
+    for obj in ["BitComponent", "BitNumber", "BitTmp1", "BitTmp2", "BitTmp3"].iter() {
         try!(conn.exec(&objectives::remove(obj.to_string())));
         try!(conn.exec(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
     }

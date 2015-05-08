@@ -51,6 +51,7 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     tgt_bit_one: Target,
     obj_bit_tmp1: Objective,
     obj_bit_tmp2: Objective,
+    obj_bit_tmp3: Objective,
     obj_bit_comp: Objective,
     obj_bit_num: Objective,
     obj_two: Objective,
@@ -85,8 +86,10 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 team: Some(SelectorTeam::On(team_bit.to_string())),
                 count: Some(1),
                 ..Selector::entity() }),
+            // TODO: Rename BitTmp1,2,3 to t0, t1, t2, and obj_bit_tmp => obj_tmp
             obj_bit_tmp1: "BitTmp1".to_string(),
             obj_bit_tmp2: "BitTmp2".to_string(),
+            obj_bit_tmp3: "BitTmp3".to_string(),
             obj_bit_comp: "BitComponent".to_string(),
             obj_bit_num: "BitNumber".to_string(),
             obj_two: "TWO".to_string(),
@@ -269,6 +272,100 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 Box::new(self.make_op_cmd_rr(
                     tmp1_reg.clone(), PlayerOp::Div, two_reg))));
         self.emit(Complete(block));
+    }
+
+    fn emit_rr(&mut self, conds: &Vec<Cond>, dst: &Register, op: PlayerOp, src: &Register) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            self.make_op_cmd_rr(dst.clone(), op, src.clone()));
+        self.emit(Complete(block));
+    }
+
+    fn emit_rset(&mut self, conds: &Vec<Cond>, dst: &Register, value: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::set(self.target.clone(), reg_name(dst.clone()), value, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_radd(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::add(self.target.clone(), reg_name(dst.clone()), count, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_rsub(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::remove(self.target.clone(), reg_name(dst.clone()), count, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_udiv(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
+        let t0 = Register::Spec(self.obj_bit_tmp1.clone());
+        let t1 = Register::Spec(self.obj_bit_tmp2.clone());
+        let t2 = Register::Spec(self.obj_bit_tmp3.clone());
+        let min_reg = Register::Spec(self.obj_min.clone());
+        let two_reg = Register::Spec(self.obj_two.clone());
+
+        let src_pos_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::ge(src.clone(), 0));
+            c };
+
+        let neg_pos_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(t0.clone(), 0));
+            c.push(Cond::ge(src.clone(), 0));
+            c };
+
+        self.emit_rr(&conds, &t0, PlayerOp::Asn, &dst);
+
+        // If needed, adjust dst to fit in 31 bits
+        // logical shift right 1
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Add, &min_reg);
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Div, &two_reg);
+        self.emit_radd(&neg_pos_conds, &dst, 1 << 30);
+        // Save the current value of dst, so we can get the remainder later.
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Asn, &dst);
+
+        // Perform the 31-bit by 31-bit division
+        self.emit_rr(&src_pos_conds, &dst, PlayerOp::Div, &src);
+
+        // If dst was adjusted to 31 bits, adjust the result to 32 bits and
+        // perform the final round of division manually.
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Mul, &two_reg);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Rem, &src);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Mul, &two_reg);
+        self.emit_rr(&neg_pos_conds, &t2, PlayerOp::Asn, &t0);
+        self.emit_rr(&neg_pos_conds, &t2, PlayerOp::Add, &min_reg);
+        self.emit_rr(&neg_pos_conds, &t2, PlayerOp::Rem, &two_reg);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Add, &t2);
+        self.emit_rr(&neg_pos_conds, &t2, PlayerOp::Asn, &t1);
+        self.emit_rr(&neg_pos_conds, &t2, PlayerOp::Sub, &src);
+        self.emit_radd(&neg_pos_conds, &dst, 1);
+        self.emit_rsub(&{
+            let mut c = neg_pos_conds.clone();
+            c.push(Cond::ge(t1.clone(), 0));
+            c.push(Cond::lt(t2.clone(), 0));
+            c }, &dst, 1);
+
+        let src_neg_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(src.clone(), 0));
+            c };
+
+        // If src's high bit is set (negative), src dominates.
+        self.emit_rset(&src_neg_conds, &dst, 0);
+        //// Unless dst's (now in t0) high bit is set, and dst is larger.
+        self.emit_rr(&src_neg_conds, &t1, PlayerOp::Asn, &t0);
+        self.emit_rr(&src_neg_conds, &t1, PlayerOp::Sub, &src);
+        self.emit_rset(&{
+            let mut c = src_neg_conds.clone();
+            c.push(Cond::lt(t0.clone(), 0));
+            c.push(Cond::ge(t1.clone(), 0));
+            c }, &dst, 1);
     }
 
     fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
@@ -465,6 +562,9 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                     self.selector.clone(), conds,
                     self.make_op_cmd_rr(dst, PlayerOp::Div, src));
                 self.emit(Complete(block));
+            }
+            UdivRR(dst, src) => {
+                self.emit_udiv(conds, dst, src);
             }
             SremRR(dst, src) => {
                 let block = make_cmd_block(
