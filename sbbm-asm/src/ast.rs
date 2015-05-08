@@ -78,9 +78,9 @@ pub enum Op {
     SubXR(Target, Objective, Register, Register),
     SubXX(Target, Objective, Target, Objective, Register),
 
-    And(Register, Register),
-    Orr(Register, Register),
-    Eor(Register, Register),
+    AndRR(Register, Register),
+    OrrRR(Register, Register),
+    EorRR(Register, Register),
 
     AsrRR(Register, Register),
     AsrRI(Register, u8),

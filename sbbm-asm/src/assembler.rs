@@ -103,6 +103,72 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         }
     }
 
+    fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
+        use commands::PlayerOp as PlOp;
+
+        match op {
+            AddRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Add, &src),
+            AddXR(tgt, obj, src, success) =>
+                self.emit_xr(&conds, &tgt, &obj, PlOp::Add, &src, &success),
+            SubRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Sub, &src),
+            SubXR(tgt, obj, src, success) =>
+                self.emit_xr(&conds, &tgt, &obj, PlOp::Sub, &src, &success),
+            AndRR(dst, src) => self.emit_and_rr(&conds, &dst, &src),
+            OrrRR(dst, src) => self.emit_orr_rr(&conds, &dst, &src),
+            EorRR(dst, src) => self.emit_eor_rr(&conds, &dst, &src),
+            AsrRR(dst, src) => self.emit_asr_rr(&conds, &dst, &src),
+            LsrRR(dst, src) => self.emit_lsr_rr(&conds, &dst, &src),
+            LslRR(dst, src) => self.emit_lsl_rr(&conds, &dst, &src),
+            MovRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Asn, &src),
+            MovRI(dst, imm) => self.emit_rset(&conds, &dst, imm),
+            MovRX(dst, tgt, obj) =>
+                self.emit_rx(&conds, &dst, PlOp::Asn, &tgt, &obj),
+            MovXR(tgt, obj, src, success) =>
+                self.emit_xr(&conds, &tgt, &obj, PlOp::Asn, &src, &success),
+            MulRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Mul, &src),
+            SdivRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Div, &src),
+            UdivRR(dst, src) => self.emit_udiv(conds, dst, src),
+            SremRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Rem, &src),
+            Srng(dst, tst, min, max) => self.emit_srng(conds, dst, tst, min, max),
+            BrL(label) => self.emit_br_l(conds, label),
+            BrR(reg) => self.emit_br_r(conds, reg),
+            RawCmd(cmd) => {
+                let block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
+                self.emit(Complete(block));
+            }
+            _ => panic!("not implemented: {:?}", op)
+        }
+    }
+
+    fn emit(&mut self, item: AssembledItem) {
+        match item {
+            Label(label) => {
+                // Queue labels so they can be processed all at once, so extra
+                // power-off blocks are elided.
+                self.pending_labels.push(label);
+            }
+            _ => {
+                // Flush pending labels
+                if !self.pending_labels.is_empty() {
+                    let first_label = self.pending_labels[0].clone();
+
+                    // FIXME: Use drain when it is no longer unstable.
+                    let mut labels = vec!();
+                    mem::swap(&mut labels, &mut self.pending_labels);
+                    for label in labels.into_iter() {
+                        self.buffer.push_back(Label(label));
+                    }
+
+                    let off_item = self.make_label_power_off_item(first_label);
+                    self.buffer.push_back(off_item);
+                }
+
+                self.buffer.push_back(item);
+            }
+        };
+
+    }
+
     fn make_op_cmd_rr(
         &self, lhs: Register, op: PlayerOp, rhs: Register) -> Command
     {
@@ -123,6 +189,264 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         -> Command
     {
         players::op(ltgt, lobj, op, self.target.clone(), reg_name(rhs))
+    }
+
+    fn emit_rr(
+        &mut self, conds: &Vec<Cond>, dst: &Register, op: PlayerOp,
+        src: &Register)
+    {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            self.make_op_cmd_rr(dst.clone(), op, src.clone()));
+        self.emit(Complete(block));
+    }
+
+    fn emit_xr(
+        &mut self, conds: &Vec<Cond>, tgt: &Target, obj: &Objective,
+        op: PlayerOp, src: &Register, success: &Register)
+    {
+        let mut block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            self.make_op_cmd_xr(tgt.clone(), obj.clone(), op, src.clone()));
+        self.add_success_count(&mut block, success.clone());
+        self.emit(Complete(block));
+    }
+
+    fn emit_rx(
+        &mut self, conds: &Vec<Cond>, dst: &Register, op: PlayerOp,
+        tgt: &Target, obj: &Objective)
+    {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            self.make_op_cmd_rx(dst.clone(), op, tgt.clone(), obj.clone()));
+        self.emit(Complete(block));
+    }
+
+    fn emit_rset(&mut self, conds: &Vec<Cond>, dst: &Register, value: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::set(self.target.clone(), reg_name(dst.clone()), value, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_radd(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::add(self.target.clone(), reg_name(dst.clone()), count, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_rsub(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::remove(self.target.clone(), reg_name(dst.clone()), count, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_and_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        let t0_obj = self.obj_tmp0.clone();
+        let t1_obj = self.obj_tmp1.clone();
+
+        self.expand_bits(conds.clone(), dst.clone(), t0_obj.clone());
+        self.expand_bits(conds.clone(), src.clone(), t1_obj.clone());
+        // 'and' the bits together.
+        self.bit_vec_op(conds.clone(), t0_obj.clone(), PlayerOp::Mul, t1_obj);
+        self.accum_bits(conds.clone(), dst.clone(), t0_obj);
+    }
+
+    fn emit_orr_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        let t0_obj = self.obj_tmp0.clone();
+        let t1_obj = self.obj_tmp1.clone();
+
+        self.expand_bits(conds.clone(), dst.clone(), t0_obj.clone());
+        self.expand_bits(conds.clone(), src.clone(), t1_obj.clone());
+        // 'orr' the bits together.
+        self.bit_vec_op(conds.clone(), t0_obj.clone(), PlayerOp::Max, t1_obj);
+        self.accum_bits(conds.clone(), dst.clone(), t0_obj);
+    }
+
+    fn emit_eor_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        let t0_obj = self.obj_tmp0.clone();
+        let t1_obj = self.obj_tmp1.clone();
+
+        self.expand_bits(conds.clone(), dst.clone(), t0_obj.clone());
+        self.expand_bits(conds.clone(), src.clone(), t1_obj.clone());
+        // 'eor' the bits together.
+        self.bit_vec_op(conds.clone(), t0_obj.clone(), PlayerOp::Add, t1_obj);
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(), players::rem_op(
+                self.tgt_bit_all.clone(), t0_obj.clone(),
+                self.target.clone(), self.obj_two.clone()));
+        self.emit(Complete(block));
+        self.accum_bits(conds.clone(), dst.clone(), t0_obj);
+    }
+
+    fn emit_asr_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        self.raw_shift_right(conds.clone(), dst.clone(), src.clone());
+
+        let t0_obj = self.obj_tmp0.clone();
+        let lt_zero_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(dst.clone(), 0));
+            c };
+        let t0 = Register::Spec(t0_obj.clone());
+
+        let sign_bits_tgt = Target::Sel(Selector {
+            team: Some(SelectorTeam::On(self.team_bit.clone())),
+            scores: {
+                let mut s = HashMap::new();
+                s.insert(t0_obj, Interval::Min(-1));
+                s },
+            ..Selector::entity()
+        });
+        // if dst < 0 execute-in-bitwise-entities: computer t0 += entity BitComponent
+        let block = make_cmd_block(
+            self.selector.clone(), lt_zero_conds, Execute(
+                sign_bits_tgt, REL_ZERO,
+                Box::new(self.make_op_cmd_rx(
+                    t0.clone(), PlayerOp::Add,
+                    self.tgt_bit_one.clone(), self.obj_bit_comp.clone()))));
+        self.emit(Complete(block));
+
+        // copy computer t0 to dst
+        self.emit_rr(&conds, dst, PlayerOp::Asn, &t0);
+    }
+
+    fn emit_lsr_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        self.raw_shift_right(conds.clone(), dst.clone(), src.clone());
+
+        let tmp0 = self.obj_tmp0.clone();
+        let mut lt_zero_conds = conds.clone();
+        lt_zero_conds.push(Cond::lt(dst.clone(), 0));
+        let t0 = Register::Spec(tmp0.clone());
+
+        let high_bit_tgt = Target::Sel(Selector {
+            team: Some(SelectorTeam::On(self.team_bit.clone())),
+            count: Some(1),
+            scores: {
+                let mut s = HashMap::new();
+                s.insert(tmp0, Interval::Bounded(-1, -1));
+                s },
+            ..Selector::entity()
+        });
+        // if dst < 0 computer t0 += entity[high-bit] BitComponent
+        let block = make_cmd_block(
+            self.selector.clone(), lt_zero_conds, self.make_op_cmd_rx(
+                t0.clone(), PlayerOp::Add,
+                high_bit_tgt, self.obj_bit_comp.clone()));
+        self.emit(Complete(block));
+
+        // copy computer t0 to dst
+        self.emit_rr(&conds, dst, PlayerOp::Asn, &t0);
+    }
+
+    fn emit_lsl_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
+        self.uses_bitwise = true;
+
+        self.activate_bitwise_entities(conds.clone(), src.clone());
+
+        let tmp0 = self.obj_tmp0.clone();
+        let two_reg = Register::Spec(self.obj_two.clone());
+
+        let active_bit_tgt = Target::Sel(Selector {
+            team: Some(SelectorTeam::On(self.team_bit.clone())),
+            scores: {
+                let mut s = HashMap::new();
+                s.insert(tmp0, Interval::Min(0));
+                s },
+            ..Selector::entity()
+        });
+        // execute-in-bitwise-entities: dst *= TWO
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(), Execute(
+                active_bit_tgt, REL_ZERO,
+                Box::new(self.make_op_cmd_rr(
+                    dst.clone(), PlayerOp::Mul, two_reg))));
+        self.emit(Complete(block));
+    }
+
+    fn emit_srng(
+        &mut self, conds: Vec<Cond>, dst: Register, test: Register,
+        min: Option<i32>, max: Option<i32>)
+    {
+        let one_conds = {
+            let mut c = conds.clone();
+            if let Some(interval) = Interval::new(min, max) {
+                c.push(Cond::new(test, interval));
+            } else {
+                // TODO: Issue a warning.
+            }
+            c };
+
+        self.emit_rset(&conds, &dst, 0);
+        self.emit_rset(&one_conds, &dst, 1);
+    }
+
+    fn emit_br_l(&mut self, conds: Vec<Cond>, label: String) {
+        // FIXME: formalize unique label generation.
+        let cont_label = format!("{}_cont_{}", label, self.unique);
+        self.unique += 1;
+
+        let test_reg = Register::Spec("TEST".to_string());
+        self.emit_rset(&vec!(), &test_reg, 0);
+        self.emit_rset(&conds, &test_reg, 1);
+
+        let selector = self.selector.clone();
+        let test_reg_copy = test_reg.clone();
+        self.emit(Pending(label, Box::new(move |extent| {
+            match extent {
+                Extent::Empty => {
+                    panic!("oh no!");
+                }
+                Extent::MinMax(min, max) => {
+                    make_cmd_block(
+                        selector, vec!(Cond::eq(test_reg_copy, 1)),
+                        Fill(
+                            min.as_abs(), max.as_abs(),
+                            "minecraft:redstone_block".to_string(),
+                            None, None, None))
+                }
+            }
+        })));
+
+        let selector = self.selector.clone();
+        let test_reg_copy = test_reg.clone();
+        self.emit(Pending(cont_label.clone(), Box::new(move |extent| {
+            match extent {
+                Extent::Empty => {
+                    panic!("oh no!");
+                }
+                Extent::MinMax(min, max) => {
+                    make_cmd_block(
+                        selector, vec!(Cond::eq(test_reg_copy, 0)),
+                        Fill(
+                            min.as_abs(), max.as_abs(),
+                            "minecraft:redstone_block".to_string(),
+                            None, None, None))
+                }
+            }
+        })));
+
+        self.emit(Terminal);
+        self.emit(Label(cont_label));
+    }
+
+    fn emit_br_r(&mut self, conds: Vec<Cond>, reg: Register) {
+        let block = make_cmd_block(
+            self.selector.clone(), conds,
+            Say(format!("FIXME: emit BrR to {}", reg_name(reg))));
+        self.emit(Complete(block));
+        self.emit(Terminal);
     }
 
     fn expand_bits(&mut self, conds: Vec<Cond>, reg: Register, bit_obj: Objective) {
@@ -185,10 +509,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         self.bit_vec_op(conds.clone(), bit_obj.clone(), PlayerOp::Mul, bit_comp);
 
         // Zero the dst register.
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(),
-            players::set(self.target.clone(), reg_name(dst.clone()), 0, None));
-        self.emit(Complete(block));
+        self.emit_rset(&conds, &dst, 0);
 
         // Accumulate the bit entities' bit_obj into dst.
         // Like this: dst + [8, 0, 2, 1] = 11
@@ -201,7 +522,9 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     }
 
     fn bit_vec_op(&mut self, conds: Vec<Cond>, lhs: Objective, op: PlayerOp, rhs: Objective) {
-        //execute @e[team=Shifters] ~ ~ ~ scoreboard players operation @e[team=Shifters,c=1] BitTmp1 *= @e[team=Shifters,c=1] BitTmp2
+        // execute @e[team=BITWISE] ~ ~ ~
+        //   scoreboard players operation
+        //     @e[team=BITWISE,c=1] lhs *= @e[team=BITWISE,c=1] rhs
         let block = make_cmd_block(
             self.selector.clone(), conds, Execute(
                 self.tgt_bit_all.clone(), REL_ZERO,
@@ -216,8 +539,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         let tmp0 = self.obj_tmp0.clone();
 
         // SIMD copy bitwise entities' BitNumber to tmp0
-        self.bit_vec_op(
-            conds.clone(), tmp0.clone(), PlayerOp::Asn, bit_num);
+        self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Asn, bit_num);
 
         // Vector-scalar remove 32 from bitwise entities' tmp0
         let block = make_cmd_block(
@@ -243,16 +565,10 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         let min_reg = Register::Spec(self.obj_min.clone());
 
         // Copy to t0
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(), self.make_op_cmd_rr(
-                t0.clone(), PlayerOp::Asn, dst.clone()));
-        self.emit(Complete(block));
+        self.emit_rr(&conds, &t0, PlayerOp::Asn, &dst);
 
         // if dst < 0, t0 -= i32::MIN
-        let block = make_cmd_block(
-            self.selector.clone(), lt_zero_conds.clone(),
-            self.make_op_cmd_rr(t0.clone(), PlayerOp::Sub, min_reg));
-        self.emit(Complete(block));
+        self.emit_rr(&lt_zero_conds, &t0, PlayerOp::Sub, &min_reg);
 
         self.activate_bitwise_entities(conds.clone(), src);
 
@@ -264,40 +580,12 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 s },
             ..Selector::entity()
         });
-        // execute-in-bitwise-entities: divide computer tmp0 by TWO if entity tmp0 > 0
+        // execute-in-active-bitwise-entities: divide computer t0 by TWO
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), Execute(
                 active_bit_tgt, REL_ZERO,
                 Box::new(self.make_op_cmd_rr(
                     t0.clone(), PlayerOp::Div, two_reg))));
-        self.emit(Complete(block));
-    }
-
-    fn emit_rr(&mut self, conds: &Vec<Cond>, dst: &Register, op: PlayerOp, src: &Register) {
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(),
-            self.make_op_cmd_rr(dst.clone(), op, src.clone()));
-        self.emit(Complete(block));
-    }
-
-    fn emit_rset(&mut self, conds: &Vec<Cond>, dst: &Register, value: i32) {
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(),
-            players::set(self.target.clone(), reg_name(dst.clone()), value, None));
-        self.emit(Complete(block));
-    }
-
-    fn emit_radd(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(),
-            players::add(self.target.clone(), reg_name(dst.clone()), count, None));
-        self.emit(Complete(block));
-    }
-
-    fn emit_rsub(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
-        let block = make_cmd_block(
-            self.selector.clone(), conds.clone(),
-            players::remove(self.target.clone(), reg_name(dst.clone()), count, None));
         self.emit(Complete(block));
     }
 
@@ -367,331 +655,6 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             c }, &dst, 1);
     }
 
-    fn assemble_instr(&mut self, conds: Vec<Cond>, op: Op) {
-        match op {
-            AddRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Add, src));
-                self.emit(Complete(block));
-            }
-            AddXR(tgt, obj, src, success) => {
-                let mut block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_xr(tgt, obj, PlayerOp::Add, src));
-                self.add_success_count(&mut block, success);
-                self.emit(Complete(block));
-            }
-            SubRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Sub, src));
-                self.emit(Complete(block));
-            }
-            SubXR(sel, obj, src, success) => {
-                let mut block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_xr(sel, obj, PlayerOp::Sub, src));
-                self.add_success_count(&mut block, success);
-                self.emit(Complete(block));
-            }
-            And(dst, src) => {
-                self.uses_bitwise = true;
-
-                let tmp0 = self.obj_tmp0.clone();
-                let tmp1 = self.obj_tmp1.clone();
-
-                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
-                self.expand_bits(conds.clone(), src, tmp1.clone());
-                // 'and' the bits together.
-                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Mul, tmp1);
-                self.accum_bits(conds.clone(), dst, tmp0);
-            }
-            Orr(dst, src) => {
-                self.uses_bitwise = true;
-
-                let tmp0 = self.obj_tmp0.clone();
-                let tmp1 = self.obj_tmp1.clone();
-
-                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
-                self.expand_bits(conds.clone(), src, tmp1.clone());
-                // 'orr' the bits together.
-                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Max, tmp1);
-                self.accum_bits(conds.clone(), dst, tmp0);
-            }
-            Eor(dst, src) => {
-                self.uses_bitwise = true;
-
-                let tmp0 = self.obj_tmp0.clone();
-                let tmp1 = self.obj_tmp1.clone();
-
-                self.expand_bits(conds.clone(), dst.clone(), tmp0.clone());
-                self.expand_bits(conds.clone(), src, tmp1.clone());
-                // 'eor' the bits together.
-                self.bit_vec_op(conds.clone(), tmp0.clone(), PlayerOp::Add, tmp1);
-                let block = make_cmd_block(
-                    self.selector.clone(), conds.clone(), players::rem_op(
-                        self.tgt_bit_all.clone(), tmp0.clone(),
-                        self.target.clone(), self.obj_two.clone()));
-                self.emit(Complete(block));
-                self.accum_bits(conds.clone(), dst, tmp0);
-            }
-            AsrRR(dst, src) => {
-                self.uses_bitwise = true;
-
-                self.raw_shift_right(conds.clone(), dst.clone(), src);
-
-                let tmp0 = self.obj_tmp0.clone();
-                let mut lt_zero_conds = conds.clone();
-                lt_zero_conds.push(Cond::lt(dst.clone(), 0));
-                let t0 = Register::Spec(tmp0.clone());
-
-                let sign_bits_tgt = Target::Sel(Selector {
-                    team: Some(SelectorTeam::On(self.team_bit.clone())),
-                    scores: {
-                        let mut s = HashMap::new();
-                        s.insert(tmp0, Interval::Min(-1));
-                        s },
-                    ..Selector::entity()
-                });
-                // if dst < 0 execute-in-bitwise-entities: computer t0 += entity BitComponent
-                let block = make_cmd_block(
-                    self.selector.clone(), lt_zero_conds, Execute(
-                        sign_bits_tgt, REL_ZERO,
-                        Box::new(self.make_op_cmd_rx(
-                            t0.clone(), PlayerOp::Add,
-                            self.tgt_bit_one.clone(), self.obj_bit_comp.clone()))));
-                self.emit(Complete(block));
-
-                // copy computer tmp0 to dst
-                let block = make_cmd_block(
-                    self.selector.clone(), conds, self.make_op_cmd_rr(
-                        dst, PlayerOp::Asn, t0));
-                self.emit(Complete(block));
-            }
-            LsrRR(dst, src) => {
-                self.uses_bitwise = true;
-
-                self.raw_shift_right(conds.clone(), dst.clone(), src);
-
-                let tmp0 = self.obj_tmp0.clone();
-                let mut lt_zero_conds = conds.clone();
-                lt_zero_conds.push(Cond::lt(dst.clone(), 0));
-                let t0 = Register::Spec(tmp0.clone());
-
-                let high_bit_tgt = Target::Sel(Selector {
-                    team: Some(SelectorTeam::On(self.team_bit.clone())),
-                    count: Some(1),
-                    scores: {
-                        let mut s = HashMap::new();
-                        s.insert(tmp0, Interval::Bounded(-1, -1));
-                        s },
-                    ..Selector::entity()
-                });
-                // if dst < 0 computer t0 += entity[high-bit] BitComponent
-                let block = make_cmd_block(
-                    self.selector.clone(), lt_zero_conds, self.make_op_cmd_rx(
-                        t0.clone(), PlayerOp::Add,
-                        high_bit_tgt, self.obj_bit_comp.clone()));
-                self.emit(Complete(block));
-
-                // copy computer tmp0 to dst
-                let block = make_cmd_block(
-                    self.selector.clone(), conds, self.make_op_cmd_rr(
-                        dst, PlayerOp::Asn, t0));
-                self.emit(Complete(block));
-            }
-            LslRR(dst, src) => {
-                self.uses_bitwise = true;
-
-                self.activate_bitwise_entities(conds.clone(), src);
-
-                let tmp0 = self.obj_tmp0.clone();
-                let two_reg = Register::Spec(self.obj_two.clone());
-
-                let active_bit_tgt = Target::Sel(Selector {
-                    team: Some(SelectorTeam::On(self.team_bit.clone())),
-                    scores: {
-                        let mut s = HashMap::new();
-                        s.insert(tmp0, Interval::Min(0));
-                        s },
-                    ..Selector::entity()
-                });
-                // execute-in-bitwise-entities: dst *= TWO
-                let block = make_cmd_block(
-                    self.selector.clone(), conds.clone(), Execute(
-                        active_bit_tgt, REL_ZERO,
-                        Box::new(self.make_op_cmd_rr(
-                            dst, PlayerOp::Mul, two_reg))));
-                self.emit(Complete(block));
-            }
-            MovRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Asn, src));
-                self.emit(Complete(block));
-            }
-            MovRI(dst, imm) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    players::set(self.target.clone(), reg_name(dst), imm, None));
-                self.emit(Complete(block));
-            }
-            MovRX(dst, sel, obj) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rx(dst, PlayerOp::Asn, sel, obj));
-                self.emit(Complete(block));
-            }
-            MovXR(sel, obj, src, success) => {
-                let mut block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_xr(sel, obj, PlayerOp::Asn, src));
-                self.add_success_count(&mut block, success);
-                self.emit(Complete(block));
-            }
-            MulRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Mul, src));
-                self.emit(Complete(block));
-            }
-            SdivRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Div, src));
-                self.emit(Complete(block));
-            }
-            UdivRR(dst, src) => {
-                self.emit_udiv(conds, dst, src);
-            }
-            SremRR(dst, src) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    self.make_op_cmd_rr(dst, PlayerOp::Rem, src));
-                self.emit(Complete(block));
-            }
-            Srng(dst, test, min, max) => {
-                let mut one_conds = conds.clone();
-                if let Some(interval) = Interval::new(min, max) {
-                    one_conds.push(Cond::new(test, interval));
-                } else {
-                    // TODO: Issue a warning.
-                }
-
-                let zero_block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    players::set(
-                        self.target.clone(), reg_name(dst.clone()), 0, None));
-
-                let one_block = make_cmd_block(
-                    self.selector.clone(), one_conds,
-                    players::set(self.target.clone(), reg_name(dst), 1, None));
-
-                self.emit(Complete(zero_block));
-                self.emit(Complete(one_block));
-            }
-            BrL(label) => {
-                // FIXME: formalize unique label generation.
-                let cont_label = format!("{}_cont_{}", label, self.unique);
-                self.unique += 1;
-
-                let zero_block = make_cmd_block(
-                    self.selector.clone(), vec!(),
-                    players::set(
-                        self.target.clone(), "TEST".to_string(), 0, None));
-
-                let one_block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    players::set(
-                        self.target.clone(), "TEST".to_string(), 1, None));
-
-                self.emit(Complete(zero_block));
-                self.emit(Complete(one_block));
-
-                let selector = self.selector.clone();
-                self.emit(Pending(label, Box::new(move |extent| {
-                    match extent {
-                        Extent::Empty => {
-                            panic!("oh no!");
-                        }
-                        Extent::MinMax(min, max) => {
-                            let test_reg = Register::Spec("TEST".to_string());
-                            make_cmd_block(
-                                selector, vec!(Cond::eq(test_reg, 1)),
-                                Fill(
-                                    min.as_abs(), max.as_abs(),
-                                    "minecraft:redstone_block".to_string(),
-                                    None, None, None))
-                        }
-                    }
-                })));
-
-                let selector = self.selector.clone();
-                self.emit(Pending(cont_label.clone(), Box::new(move |extent| {
-                    match extent {
-                        Extent::Empty => {
-                            panic!("oh no!");
-                        }
-                        Extent::MinMax(min, max) => {
-                            let test_reg = Register::Spec("TEST".to_string());
-                            make_cmd_block(
-                                selector, vec!(Cond::eq(test_reg, 0)),
-                                Fill(
-                                    min.as_abs(), max.as_abs(),
-                                    "minecraft:redstone_block".to_string(),
-                                    None, None, None))
-                        }
-                    }
-                })));
-
-                self.emit(Terminal);
-                self.emit(Label(cont_label));
-            }
-            BrR(_) => {
-                let block = make_cmd_block(
-                    self.selector.clone(), conds,
-                    Say("FIXME: emit BrR".to_string()));
-                self.emit(Complete(block));
-                self.emit(Terminal);
-            }
-            RawCmd(cmd) => {
-                let block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
-                self.emit(Complete(block));
-            }
-            _ => panic!("not implemented: {:?}", op)
-        }
-    }
-
-    fn emit(&mut self, item: AssembledItem) {
-        match item {
-            Label(label) => {
-                // Queue labels so they can be processed all at once, so extra
-                // power-off blocks are elided.
-                self.pending_labels.push(label);
-            }
-            _ => {
-                // Flush pending labels
-                if !self.pending_labels.is_empty() {
-                    let first_label = self.pending_labels[0].clone();
-
-                    // FIXME: Use drain when it is no longer unstable.
-                    let mut labels = vec!();
-                    mem::swap(&mut labels, &mut self.pending_labels);
-                    for label in labels.into_iter() {
-                        self.buffer.push_back(Label(label));
-                    }
-
-                    let off_item = self.make_label_power_off_item(first_label);
-                    self.buffer.push_back(off_item);
-                }
-
-                self.buffer.push_back(item);
-            }
-        };
-
-    }
-
     fn add_success_count(&self, block: &mut Block, reg: Register) {
         let stats = make_command_stats(self.target.clone(), reg_name(reg));
         block.nbt.insert("CommandStats".to_string(), stats);
@@ -757,6 +720,10 @@ impl<S : Iterator<Item=Statement>> Iterator for Assembler<S> {
     type Item = AssembledItem;
 
     fn next(&mut self) -> Option<AssembledItem> {
+        if self.done {
+            return None;
+        }
+
         while self.buffer.is_empty() {
             if let Some(stmt) = self.input.next() {
                 self.assemble(stmt);
