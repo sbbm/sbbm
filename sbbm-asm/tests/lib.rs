@@ -52,8 +52,6 @@ fn write(cmd: &Command) -> io::Result<()> {
     write!(f, "{}\n", cmd)
 }
 
-// NOTE: This requires "/gamerule logAdminCommands false"
-// Probably some other things are also required.  I need a server init script.
 fn exec(cmd: &Command) -> io::Result<String> {
     // FIXME: Eliminate all unwrap to prevent poisoning the mutex.
     let (_, output) = capture_until(|_| true, || {
@@ -115,9 +113,10 @@ fn capture_until<F, P, T>(p: P, f: F) -> (T, String)
 }
 
 fn capture<F, T>(f: F) -> (T, String) where F : Fn() -> T {
-    let (result, mut output) = capture_until(|s| s.contains("DONEDONEDONE"), || {
+    let marker = "54799be5-7239-4e00-bd9f-095ae6ed58a3";
+    let (result, mut output) = capture_until(|s| s.contains(marker), || {
         let result = f();
-        write(&Command::Say("DONEDONEDONE".to_string())).unwrap();
+        write(&Command::Say(marker.to_string())).unwrap();
         result
     });
 
@@ -134,11 +133,12 @@ fn capture<F, T>(f: F) -> (T, String) where F : Fn() -> T {
 fn run_asm(input: &str) {
     // FIXME: Eliminate all unwrap to prevent poisoning the mutex.
 
-    // TODO: Chain an assembled item that executes a 'say' marker command, and
-    // use capture_until to wait for that marker to provide more reliable
-    // testing of multi-stage assembled programs.
-    let (dirty_extent, _) = capture(|| {
-        let mut parser = Parser::new(Lexer::new(input));
+    let marker = "6ee5dd4a-ea5c-476d-bcab-4c2a912ce2ed";
+    let (dirty_extent, _) = capture_until(|s| s.contains(marker), || {
+        let mut marked = input.to_string();
+        marked.push_str("\n\traw say ");
+        marked.push_str(marker);
+        let mut parser = Parser::new(Lexer::new(&marked[..]));
         let assembler = Assembler::new(parser.parse_program().into_iter());
         let motion = LinearMotion::new(Vec3::new(0, 57, 0));
         let mut layout = Layout::new(motion, assembler);
