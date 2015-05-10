@@ -4,7 +4,7 @@ pushd `dirname $0` > /dev/null
 SCRIPT_DIR=`pwd`
 popd > /dev/null
 
-SERVER_DIR="$SCRIPT_DIR/server"
+SERVER_DIR="$SCRIPT_DIR"
 MINECRAFT_JAR="$SERVER_DIR/minecraft_server.1.8.3.jar"
 JAVA_OPTS="-Xms1G -Xmx1G"
 
