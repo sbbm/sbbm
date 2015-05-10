@@ -129,6 +129,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             SdivRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Div, &src),
             UdivRR(dst, src) => self.emit_udiv(conds, dst, src),
             SremRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Rem, &src),
+            UremRR(dst, src) => self.emit_urem(conds, dst, src),
             Srng(dst, tst, min, max) => self.emit_srng(conds, dst, tst, min, max),
             BrL(label) => self.emit_br_l(conds, label),
             BrR(reg) => self.emit_br_r(conds, reg),
@@ -653,6 +654,68 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             c.push(Cond::lt(t0.clone(), 0));
             c.push(Cond::ge(t1.clone(), 0));
             c }, &dst, 1);
+    }
+
+    fn emit_urem(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        let t1 = Register::Spec(self.obj_tmp1.clone());
+        let min_reg = Register::Spec(self.obj_min.clone());
+        let two_reg = Register::Spec(self.obj_two.clone());
+
+        // Save the original value of dst for later comparisons.
+        self.emit_rr(&conds, &t0, PlayerOp::Asn, &dst);
+
+        let neg_neg_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(dst.clone(), 0));
+            c.push(Cond::lt(src.clone(), 0));
+            c };
+
+        // Calculate a potential remainder, but if it is negative put
+        // things back like they were.  (This looks strange because dst
+        // is checked twice in a row the same way, but its value
+        // changes in the meantime.)
+        self.emit_rr(&neg_neg_conds, &dst, PlayerOp::Sub, &src);
+        self.emit_rr(&neg_neg_conds, &dst, PlayerOp::Add, &src);
+
+        let src_pos_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::ge(src.clone(), 0));
+            c };
+
+        let neg_pos_conds = {
+            let mut c = conds.clone();
+            c.push(Cond::lt(t0.clone(), 0));
+            c.push(Cond::ge(src.clone(), 0));
+            c };
+
+        // If needed, adjust dst to fit in 31 bits
+        // logical shift right 1
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Add, &min_reg);
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Div, &two_reg);
+        self.emit_radd(&neg_pos_conds, &dst, 1 << 30);
+
+        // Perform the 31-bit by 31-bit remainder.
+        self.emit_rr(&src_pos_conds, &dst, PlayerOp::Rem, &src);
+
+        // If dst was adjusted to 31 bits, adjust the result to 32 bits
+        // and perform the final round of division manually.
+        // (There is room for simplification here, I think.  The last
+        // four lines may be able to eliminate their use of t1, and
+        // some of the operations that go with it.)
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Mul, &two_reg);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Asn, &t0);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Add, &min_reg);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Rem, &two_reg);
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Add, &t1);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Asn, &dst);
+        self.emit_rr(&neg_pos_conds, &t1, PlayerOp::Sub, &src);
+        self.emit_rr(&{
+            let mut c = neg_pos_conds.clone();
+            c.push(Cond::lt(t1.clone(), 0));
+            c.push(Cond::ge(dst.clone(), 0));
+            c }, &dst, PlayerOp::Add, &src);
+        self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Sub, &src);
     }
 
     fn add_success_count(&self, block: &mut Block, reg: Register) {
