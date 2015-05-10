@@ -2,5 +2,6 @@
 eula.txt
 server.properties
 minecraft_server*.jar
+capture
 logs/
 world/
