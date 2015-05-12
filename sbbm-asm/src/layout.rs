@@ -124,22 +124,22 @@ impl LayoutMotion for PackedMotion {
     }
 }
 
-pub struct Layout<Motion, Source>
-    where Motion : LayoutMotion,
-          Source : Iterator<Item=AssembledItem> {
+pub struct Layout<Source>
+    where Source : Iterator<Item=AssembledItem>
+{
     input: Source,
     input_done: bool,
-    motion: Motion,
+    motion: Box<LayoutMotion>,
     buffer: VecDeque<(Vec3, Block)>,
     complete_extents: HashMap<String, Extent>,
     active_extents: HashMap<String, Extent>,
     pending: Vec<(String, Vec3, PendingFn)>,
 }
 
-impl<Motion, Source> Layout<Motion, Source>
-    where Motion : LayoutMotion,
-          Source : Iterator<Item=AssembledItem> {
-    pub fn new(motion: Motion, input: Source) -> Layout<Motion, Source> {
+impl<Source> Layout<Source>
+    where Source : Iterator<Item=AssembledItem>
+{
+    pub fn new(motion: Box<LayoutMotion>, input: Source) -> Layout<Source> {
         Layout {
             input: input,
             input_done: false,
@@ -233,9 +233,9 @@ impl<Motion, Source> Layout<Motion, Source>
 // after iteration so get_power_extent can be used, but having to do:
 //     for .. in &mut layout { }
 // is awkward.
-impl<'a, Motion, Source> Iterator for &'a mut Layout<Motion, Source>
-    where Motion : LayoutMotion,
-          Source : Iterator<Item=AssembledItem> {
+impl<'a, Source> Iterator for &'a mut Layout<Source>
+    where Source : Iterator<Item=AssembledItem>
+{
     type Item = (Vec3, Block);
 
     fn next(&mut self) -> Option<(Vec3, Block)> {

@@ -7,7 +7,7 @@ use sbbm_asm::commands::{
     Command, Selector, SelectorName, SelectorTeam, Target,
     objectives, players, teams};
 use docopt::Docopt;
-use sbbm_asm::layout::{Layout, LinearMotion};
+use sbbm_asm::layout::{Layout, LayoutMotion, LinearMotion, PackedMotion};
 use sbbm_asm::lexer::Lexer;
 use sbbm_asm::nbt::{Nbt, NbtCompound};
 use sbbm_asm::parser::Parser;
@@ -18,16 +18,27 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 
 static USAGE : &'static str = "
-usage: sbbm-asm [--output OUTPUT] <source>
+usage: sbbm-asm [-l LAYOUT] [-o OUTPUT] <x> <y> <z> <source>
 
 Options:
     -o, --output OUTPUT    Output file.
+    -l, --layout LAYOUT    Layout kind (packed or linear).
 ";
 
 #[derive(Debug, RustcDecodable)]
 struct Args {
+    arg_x: i32,
+    arg_y: i32,
+    arg_z: i32,
     arg_source: String,
     flag_output: Option<String>,
+    flag_layout: Option<LayoutKind>,
+}
+
+#[derive(RustcDecodable, Debug)]
+enum LayoutKind {
+    Linear,
+    Packed,
 }
 
 #[cfg(not(test))]
@@ -50,14 +61,14 @@ fn main() {
 
         // FIXME: Check for warnings/errors before starting to place blocks.
         let assembler = Assembler::new(stmts.into_iter());
-        let motion = LinearMotion::new(Vec3::new(27, 57, 0));
-        //let motion = PackedMotion::new(Vec3::new(27, 57, 0));
+        let origin = Vec3::new(args.arg_x, args.arg_y, args.arg_z);
+        let motion : Box<LayoutMotion> = match args.flag_layout {
+            Some(LayoutKind::Linear) => Box::new(LinearMotion::new(origin)),
+            Some(LayoutKind::Packed) | None => Box::new(PackedMotion::new(origin)),
+        };
         let mut layout = Layout::new(motion, assembler);
 
-        output.exec(&Command::Fill(
-            Pos3::abs(26, 56, 0), Pos3::abs(60, 67, 32),
-            "minecraft:air".to_string(), None, None, None)).unwrap();
-        init_computer(&mut output).unwrap();
+        init_computer(&mut output, origin).unwrap();
         for (pos, block) in &mut layout {
             output.exec(&Command::SetBlock(
                 pos.as_abs(), block.id, None, None,
@@ -76,14 +87,14 @@ impl<W : Write> MinecraftConn for W {
     }
 }
 
-fn init_computer(conn: &mut MinecraftConn) -> io::Result<()> {
+fn init_computer(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
     let comp_tgt = Target::Sel(Selector {
         name: Some(SelectorName::Is("computer".to_string())),
         ..Selector::entity()
     });
 
     try!(conn.exec(&Command::Kill(comp_tgt.clone())));
-    let pos = Pos3::abs(25, 56, 0);
+    let pos = origin.as_abs();
     let mut data_tag = NbtCompound::new();
     data_tag.insert("CustomName".to_string(), Nbt::String("computer".to_string()));
     try!(conn.exec(&Command::Summon(
@@ -91,7 +102,7 @@ fn init_computer(conn: &mut MinecraftConn) -> io::Result<()> {
         Some(Nbt::Compound(data_tag)))));
 
     try!(init_registers(conn, comp_tgt.clone()));
-    try!(init_bitwise(conn));
+    try!(init_bitwise(conn, origin));
 
     Ok(())
 }
@@ -137,7 +148,7 @@ fn init_registers(conn: &mut MinecraftConn, comp_tgt: Target) -> io::Result<()> 
     Ok(())
 }
 
-fn init_bitwise(conn: &mut MinecraftConn) -> io::Result<()> {
+fn init_bitwise(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
     for obj in ["BitComponent", "BitNumber", "t0", "t1", "t2"].iter() {
         try!(conn.exec(&objectives::remove(obj.to_string())));
         try!(conn.exec(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
@@ -160,7 +171,7 @@ fn init_bitwise(conn: &mut MinecraftConn) -> io::Result<()> {
         });
         shifters.push(target.clone());
 
-        let pos = Pos3::abs(26, 56, i);
+        let pos = Pos3::abs(origin.x, origin.y, origin.z + i);
         let mut data_tag = NbtCompound::new();
         data_tag.insert("CustomName".to_string(), Nbt::String(name));
         try!(conn.exec(&Command::Summon(
