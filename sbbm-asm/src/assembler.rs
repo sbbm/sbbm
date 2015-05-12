@@ -108,9 +108,11 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
 
         match op {
             AddRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Add, &src),
+            AddRI(dst, imm) => self.emit_radd(&conds, &dst, imm),
             AddXR(tgt, obj, src, success) =>
                 self.emit_xr(&conds, &tgt, &obj, PlOp::Add, &src, &success),
             SubRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Sub, &src),
+            SubRI(dst, imm) => self.emit_rsub(&conds, &dst, imm),
             SubXR(tgt, obj, src, success) =>
                 self.emit_xr(&conds, &tgt, &obj, PlOp::Sub, &src, &success),
             AndRR(dst, src) => self.emit_and_rr(&conds, &dst, &src),

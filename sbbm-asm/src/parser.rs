@@ -199,8 +199,8 @@ impl<'a> Parser<'a> {
             Ident(mnemonic) => {
                 let res = match &mnemonic[..] {
                     "ldr" => self.parse_ldr(),
-                    m @ "add" => self.parse_addsub(m, AddRR, AddXI, AddXR),
-                    m @ "sub" => self.parse_addsub(m, SubRR, SubXI, SubXR),
+                    m @ "add" => self.parse_addsub(m, AddRR, AddRI, AddXI, AddXR),
+                    m @ "sub" => self.parse_addsub(m, SubRR, SubRI, SubXI, SubXR),
                     m @ "and" => self.parse_instr_rr(m, AndRR),
                     m @ "orr" => self.parse_instr_rr(m, OrrRR),
                     m @ "eor" => self.parse_instr_rr(m, EorRR),
@@ -263,9 +263,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_addsub<RR, XI, XR>(
-        &mut self, mnemo: &str, rr: RR, xi: XI, xr: XR) -> ParseResult<Op>
+    fn parse_addsub<RR, RI, XI, XR>(
+        &mut self, mnemo: &str, rr: RR, ri: RI, xi: XI, xr: XR) -> ParseResult<Op>
         where RR : FnOnce(Register, Register) -> Op,
+              RI : FnOnce(Register, i32) -> Op,
               XI : FnOnce(Target, Objective, i32, Register) -> Op,
               XR : FnOnce(Target, Objective, Register, Register) -> Op
     {
@@ -275,6 +276,8 @@ impl<'a> Parser<'a> {
             try!(self.expect_tok(Comma));
             if let Ok(src) = self.parse_any_reg() {
                 Ok(rr(dst, src))
+            } else if let Ok(imm) = self.parse_int() {
+                Ok(ri(dst, imm))
             } else {
                 unimplemented!();
             }
