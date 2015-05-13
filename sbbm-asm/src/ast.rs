@@ -126,7 +126,40 @@ pub enum Op {
 
     Halt,
 
-    RawCmd(String),
+    RawCmd(Vec<(CommandBlockOut, Register)>, String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CommandBlockOut {
+    SuccessCount,
+    AffectedBlocks,
+    AffectedEntities,
+    AffectedItems,
+    QueryResult,
+}
+
+impl CommandBlockOut {
+    pub fn selector(&self) -> &str {
+        use self::CommandBlockOut::*;
+        match *self {
+            SuccessCount => "SuccessCountName",
+            AffectedBlocks => "AffectedBlocksName",
+            AffectedEntities => "AffectedEntitiesName",
+            AffectedItems => "AffectedItemsName",
+            QueryResult => "QueryResultName",
+        }
+    }
+
+    pub fn objective(&self) -> &str {
+        use self::CommandBlockOut::*;
+        match *self {
+            SuccessCount => "SuccessCountObjective",
+            AffectedBlocks => "AffectedBlocksObjective",
+            AffectedEntities => "AffectedEntitiesObjective",
+            AffectedItems => "AffectedItemsObjective",
+            QueryResult => "QueryResultObjective",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

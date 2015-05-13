@@ -1,4 +1,4 @@
-use ast::{Cond, Op, Register, Statement};
+use ast::{CommandBlockOut, Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
 use commands::{Objective, Target};
@@ -78,7 +78,7 @@ impl<'a> Parser<'a> {
                 self.accept();
                 Some(LabelStmt(label[..label.len()-1].to_string()))
             }
-            Ident(_) => {
+            Ident(_) | Raw(_, _) => {
                 let op = self.parse_op().unwrap();
                 Some(Instr(vec!(), op))
             }
@@ -86,10 +86,6 @@ impl<'a> Parser<'a> {
                 let conds = self.parse_conds().unwrap();
                 let op = self.parse_op().unwrap();
                 Some(Instr(conds, op))
-            }
-            Raw(raw) => {
-                self.accept();
-                Some(Instr(vec!(), RawCmd(raw)))
             }
             Meta(_) => {
                 loop {
@@ -110,23 +106,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_any_reg(&mut self) -> ParseResult<Register> {
-        match self.cur().item {
-            GenReg(reg) => {
-                let num = reg[1..].parse::<i32>().unwrap();
-                self.accept();
-                Ok(Register::Gen(num))
-            }
-            PredReg(reg) => {
-                let num = reg[1..].parse::<i32>().unwrap();
-                self.accept();
-                Ok(Register::Pred(num))
-            }
-            SpecReg(reg) => {
-                self.accept();
-                Ok(Register::Spec(reg))
-            }
+        if let Some(reg) = try_parse_reg(self.cur().item) {
+            self.accept();
+            Ok(reg)
+        } else {
             // FIXME: Move to Display, rather than Debug
-            _ => Err(format!("expected register but found {:?}", self.cur())),
+            Err(format!("expected register but found {:?}", self.cur()))
         }
     }
 
@@ -222,9 +207,23 @@ impl<'a> Parser<'a> {
                 };
                 res
             }
-            Raw(raw) => {
+            Raw(mods, raw) => {
                 self.accept();
-                Ok(RawCmd(raw))
+                let mut raw_outs = vec!();
+                for (c, reg) in mods.into_iter() {
+                    let m = match c {
+                        's' => CommandBlockOut::SuccessCount,
+                        'b' => CommandBlockOut::AffectedBlocks,
+                        'e' => CommandBlockOut::AffectedEntities,
+                        'i' => CommandBlockOut::AffectedItems,
+                        'q' => CommandBlockOut::QueryResult,
+                        _ => panic!(
+                            "unknown raw modifier: {} in {:?}",
+                            c, self.cur())
+                    };
+                    raw_outs.push((m, try_parse_reg(reg).unwrap()));
+                }
+                Ok(RawCmd(raw_outs, raw))
             }
             // FIXME: Move to Display instead of Debug.
             _ => Err(format!("expected mnemonic but found {:?}", self.cur())),
@@ -413,6 +412,23 @@ impl<'a> Parser<'a> {
     fn parse_halt(&mut self) -> ParseResult<Op> {
         try!(self.expect_tok(Ident("halt".to_string())));
         Ok(Halt)
+    }
+}
+
+fn try_parse_reg(token: Token) -> Option<Register> {
+    match token {
+        GenReg(reg) => {
+            let num = reg[1..].parse::<i32>().unwrap();
+            Some(Register::Gen(num))
+        }
+        PredReg(reg) => {
+            let num = reg[1..].parse::<i32>().unwrap();
+            Some(Register::Pred(num))
+        }
+        SpecReg(reg) => {
+            Some(Register::Spec(reg))
+        }
+        _ => None,
     }
 }
 
@@ -619,7 +635,20 @@ fn test_halt() {
 fn test_raw_cmd() {
     let mut parser = Parser::new(Lexer::new("raw foo bar baz"));
     assert_eq!(
-        vec!(Instr(vec!(), RawCmd("foo bar baz".to_string()))),
+        vec!(Instr(vec!(), RawCmd(vec!(), "foo bar baz".to_string()))),
+        parser.parse_program());
+}
+
+#[test]
+fn test_raw_cmd_outs() {
+    use ast::CommandBlockOut::*;
+    let mut parser = Parser::new(Lexer::new("raw~siq r0, r1, r2, foo bar baz"));
+    let outs = vec!(
+        (SuccessCount, Register::Gen(0)),
+        (AffectedItems, Register::Gen(1)),
+        (QueryResult, Register::Gen(2)));
+    assert_eq!(
+        vec!(Instr(vec!(), RawCmd(outs, "foo bar baz".to_string()))),
         parser.parse_program());
 }
 
@@ -629,6 +658,6 @@ fn test_raw_cmd_cond() {
     assert_eq!(
         vec!(Instr(
             vec!(Cond::eq(Register::Pred(0), 1)),
-            RawCmd("foo bar baz".to_string()))),
+            RawCmd(vec!(), "foo bar baz".to_string()))),
         parser.parse_program());
 }

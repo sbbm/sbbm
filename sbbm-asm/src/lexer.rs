@@ -28,7 +28,7 @@ pub enum Token {
     PredReg(String),
     SpecReg(String),
     Def(String, String),
-    Raw(String),
+    Raw(Vec<(char, Token)>, String),
     Eof,
 }
 
@@ -207,6 +207,13 @@ fn is_whitespace(c: char) -> LexResult<()> {
     }
 }
 
+fn is_alpha(c: char) -> LexResult<()> {
+    match c {
+        'a' ... 'z' | 'A' ... 'Z' => Ok(()),
+        _ => Err(format!("expected alpha but found '{}'", c)),
+    }
+}
+
 fn is_digit(c: char) -> LexResult<()> {
     match c {
         '0' ... '9' => Ok(()),
@@ -321,6 +328,21 @@ fn lex_selector_or_attr(lexer: &mut Lexer) -> StateFn {
 static GEN_REG_REGEX : Regex = regex!(r"^r\d+$");
 static PRED_REG_REGEX : Regex = regex!(r"^p\d+$");
 
+fn classify_register(s: &str) -> Option<Token> {
+    if GEN_REG_REGEX.is_match(s) {
+        let reg = s.to_string();
+        Some(GenReg(reg))
+    } else if PRED_REG_REGEX.is_match(s) {
+        let reg = s.to_string();
+        Some(PredReg(reg))
+    } else if s == "lr" {
+        let reg = s.to_string();
+        Some(SpecReg(reg))
+    } else {
+        None
+    }
+}
+
 fn lex_ident_like(lexer: &mut Lexer) -> StateFn {
     // FIXME: try!
     lexer.expect(is_ident_start).unwrap();
@@ -336,15 +358,8 @@ fn lex_ident_like(lexer: &mut Lexer) -> StateFn {
             return StateFn(lex_def)
         } else if lexer.piece() == "raw" {
             return StateFn(lex_raw)
-        } else if GEN_REG_REGEX.is_match(lexer.piece()) {
-            let reg = lexer.piece().to_string();
-            lexer.emit(GenReg(reg));
-        } else if PRED_REG_REGEX.is_match(lexer.piece()) {
-            let reg = lexer.piece().to_string();
-            lexer.emit(PredReg(reg));
-        } else if lexer.piece() == "lr" {
-            let reg = lexer.piece().to_string();
-            lexer.emit(SpecReg(reg));
+        } else if let Some(reg) = classify_register(lexer.piece()) {
+            lexer.emit(reg);
         } else {
             let ident = lexer.piece().to_string();
             lexer.emit(Ident(ident));
@@ -384,14 +399,51 @@ fn lex_def(lexer: &mut Lexer) -> StateFn {
 fn lex_raw(lexer: &mut Lexer) -> StateFn {
     // FIXME: Assert that lexer.piece() == "raw"
     lexer.skip();
+
+    let mut out_chars = vec!();
+    if lexer.accept_char('~') {
+        lexer.skip();
+
+        while let Some(c) = lexer.accept(is_alpha) {
+            out_chars.push(c);
+        }
+        lexer.skip();
+    }
+
     // FIXME: try!
     lexer.one_or_more(is_whitespace).unwrap();
+    lexer.skip();
+
+    let mut outs = vec!();
+    for c in out_chars.into_iter() {
+        lexer.zero_or_more(is_whitespace);
+        lexer.skip();
+
+        // FIXME: try!
+        lexer.expect(is_ident_start).unwrap();
+        lexer.zero_or_more(is_ident_rest);
+        if let Some(reg) = classify_register(lexer.piece()) {
+            outs.push((c, reg));
+            lexer.skip();
+        } else {
+            // FIXME: try!
+            panic!("expected register but found '{}'", lexer.piece());
+        }
+
+        lexer.zero_or_more(is_whitespace);
+        lexer.skip();
+
+        // FIXME: try!
+        lexer.expect_char(',').unwrap();
+    }
+
+    lexer.zero_or_more(is_whitespace);
     lexer.skip();
 
     lexer.zero_or_more(is_not_newline);
 
     let raw = lexer.piece().to_string();
-    lexer.emit(Raw(raw));
+    lexer.emit(Raw(outs, raw));
     StateFn(lex_start)
 }
 
@@ -481,7 +533,20 @@ fn test_def() {
 
 #[test]
 fn test_raw() {
-    assert_eq!(first_tok!("raw foo bar baz"), Raw("foo bar baz".to_string()));
+    assert_eq!(
+        first_tok!("raw foo bar baz"),
+        Raw(vec!(), "foo bar baz".to_string()));
+}
+
+#[test]
+fn test_raw_outs() {
+    let outs = vec!(
+        ('s', GenReg("r0".to_string())),
+        ('a', GenReg("r1".to_string())),
+        ('i', GenReg("r2".to_string())));
+    assert_eq!(
+        first_tok!("raw~sai r0, r1, r2, foo bar baz"),
+        Raw(outs, "foo bar baz".to_string()));
 }
 
 #[test]

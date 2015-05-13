@@ -1,4 +1,4 @@
-use ast::{Cond, Op, Register, Statement};
+use ast::{CommandBlockOut, Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
 use commands::{
@@ -135,8 +135,10 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             Srng(dst, tst, min, max) => self.emit_srng(conds, dst, tst, min, max),
             BrL(label) => self.emit_br_l(conds, label),
             BrR(reg) => self.emit_br_r(conds, reg),
-            RawCmd(cmd) => {
-                let block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
+            RawCmd(outs, cmd) => {
+                let mut block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
+                self.add_command_stats(
+                    &mut block, make_command_stats(self.target.clone(), outs));
                 self.emit(Complete(block));
             }
             _ => panic!("not implemented: {:?}", op)
@@ -721,7 +723,13 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
     }
 
     fn add_success_count(&self, block: &mut Block, reg: Register) {
-        let stats = make_command_stats(self.target.clone(), reg_name(reg));
+        let outs = vec!((CommandBlockOut::SuccessCount, reg));
+        self.add_command_stats(
+            block, make_command_stats(self.target.clone(), outs));
+    }
+
+    fn add_command_stats(&self, block: &mut Block, stats: Nbt)
+    {
         block.nbt.insert("CommandStats".to_string(), stats);
     }
 
@@ -774,10 +782,14 @@ fn reg_name(reg: Register) -> String {
     }
 }
 
-fn make_command_stats(success_count_tgt: Target, success_count_obj: String) -> Nbt {
+fn make_command_stats(
+    target: Target, outs: Vec<(CommandBlockOut, Register)>) -> Nbt
+{
     let mut stats = NbtCompound::new();
-    stats.insert("SuccessCountName".to_string(), Nbt::String(success_count_tgt.to_string()));
-    stats.insert("SuccessCountObjective".to_string(), Nbt::String(success_count_obj));
+    for (out, reg) in outs.into_iter() {
+        stats.insert(out.selector().to_string(), Nbt::String(target.to_string()));
+        stats.insert(out.objective().to_string(), Nbt::String(reg_name(reg)));
+    }
     Nbt::Compound(stats)
 }
 
