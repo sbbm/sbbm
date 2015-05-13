@@ -11,18 +11,22 @@ use sbbm_asm::layout::{Layout, LayoutMotion, LinearMotion, PackedMotion};
 use sbbm_asm::lexer::Lexer;
 use sbbm_asm::nbt::{Nbt, NbtCompound};
 use sbbm_asm::parser::Parser;
-use sbbm_asm::types::{Pos3, Vec3};
+use sbbm_asm::types::{Extent, Pos3, Vec3};
 
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
 static USAGE : &'static str = "
-usage: sbbm-asm [-l LAYOUT] [-o OUTPUT] <x> <y> <z> <source>
+usage: sbbm-asm [-l LAYOUT] [-b BOOT] [-u UNDO] [-o OUTPUT] <x> <y> <z> <source>
 
 Options:
     -o, --output OUTPUT    Output file.
     -l, --layout LAYOUT    Layout kind (packed or linear).
+    -b, --boot BOOT        A filename that will be used to write out the
+                           commands needed to boot up the assembled circuit.
+    -u, --undo UNDO        A filename that will be used to write out a list of
+                           commands that undo the work performed during assembly.
 ";
 
 #[derive(Debug, RustcDecodable)]
@@ -33,6 +37,8 @@ struct Args {
     arg_source: String,
     flag_output: Option<String>,
     flag_layout: Option<LayoutKind>,
+    flag_boot: Option<String>,
+    flag_undo: Option<String>,
 }
 
 #[derive(RustcDecodable, Debug)]
@@ -69,10 +75,32 @@ fn main() {
         let mut layout = Layout::new(motion, assembler);
 
         init_computer(&mut output, origin).unwrap();
+        let mut extent = Extent::Empty;
         for (pos, block) in &mut layout {
+            extent.add(pos);
             output.exec(&Command::SetBlock(
                 pos.as_abs(), block.id, None, None,
                 Some(Nbt::Compound(block.nbt)))).unwrap();
+        }
+
+        if let Some(undo) = args.flag_undo {
+            let mut f = File::create(Path::new(&undo[..])).unwrap();
+            if let Extent::MinMax(min, max) = extent {
+                let cmd = Command::Fill(
+                    min.as_abs(), max.as_abs(),
+                    "minecraft:air".to_string(), None, None, None);
+                write!(f, "{}\n", cmd).unwrap();
+            }
+        }
+
+        if let Some(boot) = args.flag_boot {
+            let mut f = File::create(Path::new(&boot[..])).unwrap();
+            if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
+                let cmd = Command::Fill(
+                    min.as_abs(), max.as_abs(),
+                    "minecraft:redstone_block".to_string(), None, None, None);
+                write!(f, "{}\n", cmd).unwrap();
+            }
         }
     }
 }
