@@ -8,6 +8,7 @@ macro_rules! sbbm_def {
 #[macro_export]
 macro_rules! d {
     ($name:ident, $value:expr) => {{
+        #[derive(Copy, Clone)]
         struct D;
         impl ::sbbm::RawDef for D {
             #[inline(always)]
