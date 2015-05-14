@@ -115,6 +115,19 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_any_target(&mut self) -> ParseResult<Target> {
+        match self.cur().item {
+            Ident(raw_sel) | Selector(raw_sel) => {
+                self.accept();
+                Ok(Target::Raw(raw_sel))
+            }
+            _ => {
+                // FIXME: Move to Display, rather than Debug
+                Err(format!("expected selector but found {:?}", self.cur()))
+            }
+        }
+    }
+
     fn parse_int<T>(&mut self) -> ParseResult<T>
         where T : FromStr, T::Err : Display
     {
@@ -280,38 +293,29 @@ impl<'a> Parser<'a> {
             } else {
                 unimplemented!();
             }
-        } else {
-            match self.cur().item {
-                // REVIEW: Selector only covers @-prefixed targets.
-                Selector(sel) => {
-                    let target = Target::Raw(sel);
+        } else if let Ok(target) = self.parse_any_target() {
+            try!(self.expect_tok(Comma));
+            let obj = try!(self.parse_objective());
+            try!(self.expect_tok(Comma));
 
-                    self.accept();
-                    try!(self.expect_tok(Comma));
-                    let obj = try!(self.parse_objective());
-                    try!(self.expect_tok(Comma));
-
-                    if let Ok(imm) = self.parse_int() {
-                        try!(self.expect_tok(Comma));
-                        let out_reg = try!(self.parse_any_reg());
-                        Ok(xi(target, obj, imm, out_reg))
-                    } else if let Ok(reg) = self.parse_any_reg() {
-                        try!(self.expect_tok(Comma));
-                        let out_reg = try!(self.parse_any_reg());
-                        Ok(xr(target, obj, reg, out_reg))
-                    } else {
-                        // FIXME: Print with Display rather than Debug.
-                        Err(format!(
-                            "expected register or immediate but found {:?}",
-                            self.cur()))
-                    }
-                }
-                _ => {
-                    // FIXME: Print with Display rather than Debug.
-                    Err(format!(
-                        "expected selector but found {:?}", self.cur()))
-                }
+            if let Ok(imm) = self.parse_int() {
+                try!(self.expect_tok(Comma));
+                let out_reg = try!(self.parse_any_reg());
+                Ok(xi(target, obj, imm, out_reg))
+            } else if let Ok(reg) = self.parse_any_reg() {
+                try!(self.expect_tok(Comma));
+                let out_reg = try!(self.parse_any_reg());
+                Ok(xr(target, obj, reg, out_reg))
+            } else {
+                // FIXME: Print with Display rather than Debug.
+                Err(format!(
+                    "expected register or immediate but found {:?}",
+                    self.cur()))
             }
+        } else {
+            // FIXME: Print with Display rather than Debug.
+            Err(format!(
+                "expected register or target but found {:?}", self.cur()))
         }
     }
 
@@ -324,23 +328,17 @@ impl<'a> Parser<'a> {
                 Ok(MovRR(dst, src))
             } else if let Ok(imm) = self.parse_int() {
                 Ok(MovRI(dst, imm))
-            // REVIEW: Selector only covers @-prefixed targets.
-            } else if let Selector(sel) = self.cur().item {
-                self.accept();
+            } else if let Ok(target) = self.parse_any_target() {
                 try!(self.expect_tok(Comma));
                 let obj = try!(self.parse_objective());
-                Ok(MovRX(dst, Target::Raw(sel), obj))
+                Ok(MovRX(dst, target, obj))
             } else {
                 // FIXME: Print with Display rather than Debug.
                 Err(format!(
                     "expected register, immediate, or selector but found {:?}",
                     self.cur()))
             }
-        // REVIEW: Selector only covers @-prefixed targets.
-        } else if let Selector(sel) = self.cur().item {
-            let target = Target::Raw(sel);
-
-            self.accept();
+        } else if let Ok(target) = self.parse_any_target() {
             try!(self.expect_tok(Comma));
             let obj = try!(self.parse_objective());
             try!(self.expect_tok(Comma));
@@ -362,7 +360,7 @@ impl<'a> Parser<'a> {
         } else {
             // FIXME: Print with Display rather than Debug.
             Err(format!(
-                "expected register or selector but found {:?}",
+                "expected register or target but found {:?}",
                 self.cur()))
         }
     }
