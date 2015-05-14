@@ -115,7 +115,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_any_target(&mut self) -> ParseResult<Target> {
+    fn parse_target(&mut self) -> ParseResult<Target> {
         match self.cur().item {
             Ident(raw_sel) | Selector(raw_sel) => {
                 self.accept();
@@ -293,7 +293,7 @@ impl<'a> Parser<'a> {
             } else {
                 unimplemented!();
             }
-        } else if let Ok(target) = self.parse_any_target() {
+        } else if let Ok(target) = self.parse_target() {
             try!(self.expect_tok(Comma));
             let obj = try!(self.parse_objective());
             try!(self.expect_tok(Comma));
@@ -328,7 +328,7 @@ impl<'a> Parser<'a> {
                 Ok(MovRR(dst, src))
             } else if let Ok(imm) = self.parse_int() {
                 Ok(MovRI(dst, imm))
-            } else if let Ok(target) = self.parse_any_target() {
+            } else if let Ok(target) = self.parse_target() {
                 try!(self.expect_tok(Comma));
                 let obj = try!(self.parse_objective());
                 Ok(MovRX(dst, target, obj))
@@ -338,7 +338,7 @@ impl<'a> Parser<'a> {
                     "expected register, immediate, or selector but found {:?}",
                     self.cur()))
             }
-        } else if let Ok(target) = self.parse_any_target() {
+        } else if let Ok(target) = self.parse_target() {
             try!(self.expect_tok(Comma));
             let obj = try!(self.parse_objective());
             try!(self.expect_tok(Comma));
