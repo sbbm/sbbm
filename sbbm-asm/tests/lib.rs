@@ -138,7 +138,7 @@ fn run_asm(input: &str) {
         let mut marked = input.to_string();
         marked.push_str("\n\traw say ");
         marked.push_str(marker);
-        let mut parser = Parser::new(Lexer::new(&marked[..]));
+        let mut parser = Parser::new(Lexer::mem(&marked[..]));
         let assembler = Assembler::new(parser.parse_program().into_iter());
         let motion = Box::new(LinearMotion::new(Vec3::new(0, 57, 0)));
         let mut layout = Layout::new(motion, assembler);

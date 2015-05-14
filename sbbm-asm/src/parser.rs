@@ -432,7 +432,7 @@ fn try_parse_reg(token: Token) -> Option<Register> {
 
 #[test]
 fn test_label() {
-    let mut parser = Parser::new(Lexer::new("foo:"));
+    let mut parser = Parser::new(Lexer::mem("foo:"));
     assert_eq!(
         vec!(LabelStmt("foo".to_string())),
         parser.parse_program());
@@ -440,7 +440,7 @@ fn test_label() {
 
 #[test]
 fn test_cond_op() {
-    let mut parser = Parser::new(Lexer::new("{p0, #0, #0} ldr r0, [r1]"));
+    let mut parser = Parser::new(Lexer::mem("{p0, #0, #0} ldr r0, [r1]"));
     assert_eq!(
         vec!(Instr(
             vec!(Cond::eq(Register::Pred(0), 0)),
@@ -450,7 +450,7 @@ fn test_cond_op() {
 
 #[test]
 fn test_ldr_rr() {
-    let mut parser = Parser::new(Lexer::new("ldr r0, [r1]"));
+    let mut parser = Parser::new(Lexer::mem("ldr r0, [r1]"));
     assert_eq!(
         vec!(Instr(vec!(), LdrRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -458,7 +458,7 @@ fn test_ldr_rr() {
 
 #[test]
 fn test_ldr_rl() {
-    let mut parser = Parser::new(Lexer::new("ldr r0, =foo"));
+    let mut parser = Parser::new(Lexer::mem("ldr r0, =foo"));
     assert_eq!(
         vec!(Instr(vec!(), LdrRL(Register::Gen(0), "foo".to_string()))),
         parser.parse_program());
@@ -466,7 +466,7 @@ fn test_ldr_rl() {
 
 #[test]
 fn test_add_rr() {
-    let mut parser = Parser::new(Lexer::new("add r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("add r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), AddRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -475,7 +475,7 @@ fn test_add_rr() {
 
 #[test]
 fn test_add_xi() {
-    let mut parser = Parser::new(Lexer::new("add @a, foo, #10, r0"));
+    let mut parser = Parser::new(Lexer::mem("add @a, foo, #10, r0"));
     assert_eq!(
         vec!(Instr(vec!(), AddXI(
             Target::Raw("@a".to_string()), "foo".to_string(), 10, Register::Gen(0)))),
@@ -484,7 +484,7 @@ fn test_add_xi() {
 
 #[test]
 fn test_add_xr() {
-    let mut parser = Parser::new(Lexer::new("add @a, foo, r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("add @a, foo, r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), AddXR(
             Target::Raw("@a".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
@@ -494,7 +494,7 @@ fn test_add_xr() {
 
 #[test]
 fn test_sub_rr() {
-    let mut parser = Parser::new(Lexer::new("sub r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("sub r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), SubRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -503,7 +503,7 @@ fn test_sub_rr() {
 
 #[test]
 fn test_sub_xi() {
-    let mut parser = Parser::new(Lexer::new("sub @a, foo, #10, r0"));
+    let mut parser = Parser::new(Lexer::mem("sub @a, foo, #10, r0"));
     assert_eq!(
         vec!(Instr(vec!(), SubXI(
             Target::Raw("@a".to_string()), "foo".to_string(), 10, Register::Gen(0)))),
@@ -512,7 +512,7 @@ fn test_sub_xi() {
 
 #[test]
 fn test_sub_xr() {
-    let mut parser = Parser::new(Lexer::new("sub @a, foo, r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("sub @a, foo, r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), SubXR(
             Target::Raw("@a".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
@@ -521,7 +521,7 @@ fn test_sub_xr() {
 
 #[test]
 fn test_mov_rr() {
-    let mut parser = Parser::new(Lexer::new("mov r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("mov r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), MovRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -529,7 +529,7 @@ fn test_mov_rr() {
 
 #[test]
 fn test_mov_ri() {
-    let mut parser = Parser::new(Lexer::new("mov r0, #37"));
+    let mut parser = Parser::new(Lexer::mem("mov r0, #37"));
     assert_eq!(
         vec!(Instr(vec!(), MovRI(Register::Gen(0), 37))),
         parser.parse_program());
@@ -537,7 +537,7 @@ fn test_mov_ri() {
 
 #[test]
 fn test_mov_rx() {
-    let mut parser = Parser::new(Lexer::new("mov r0, @r, foo"));
+    let mut parser = Parser::new(Lexer::mem("mov r0, @r, foo"));
     assert_eq!(
         vec!(Instr(vec!(), MovRX(Register::Gen(0), Target::Raw("@r".to_string()), "foo".to_string()))),
         parser.parse_program());
@@ -545,7 +545,7 @@ fn test_mov_rx() {
 
 #[test]
 fn test_mov_xr() {
-    let mut parser = Parser::new(Lexer::new("mov @r, foo, r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("mov @r, foo, r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), MovXR(Target::Raw("@r".to_string()), "foo".to_string(), Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -553,7 +553,7 @@ fn test_mov_xr() {
 
 #[test]
 fn test_mov_xi() {
-    let mut parser = Parser::new(Lexer::new("mov @r, foo, #15, r0"));
+    let mut parser = Parser::new(Lexer::mem("mov @r, foo, #15, r0"));
     assert_eq!(
         vec!(Instr(vec!(), MovXI(Target::Raw("@r".to_string()), "foo".to_string(), 15, Register::Gen(0)))),
         parser.parse_program());
@@ -561,7 +561,7 @@ fn test_mov_xi() {
 
 #[test]
 fn test_mul() {
-    let mut parser = Parser::new(Lexer::new("mul r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("mul r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), MulRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -569,7 +569,7 @@ fn test_mul() {
 
 #[test]
 fn test_sdiv() {
-    let mut parser = Parser::new(Lexer::new("sdiv r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("sdiv r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), SdivRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -577,7 +577,7 @@ fn test_sdiv() {
 
 #[test]
 fn test_udiv() {
-    let mut parser = Parser::new(Lexer::new("udiv r0, r1"));
+    let mut parser = Parser::new(Lexer::mem("udiv r0, r1"));
     assert_eq!(
         vec!(Instr(vec!(), UdivRR(Register::Gen(0), Register::Gen(1)))),
         parser.parse_program());
@@ -585,7 +585,7 @@ fn test_udiv() {
 
 #[test]
 fn test_br_r() {
-    let mut parser = Parser::new(Lexer::new("b lr"));
+    let mut parser = Parser::new(Lexer::mem("b lr"));
     assert_eq!(
         vec!(Instr(vec!(), BrR(Register::Spec("lr".to_string())))),
         parser.parse_program());
@@ -593,7 +593,7 @@ fn test_br_r() {
 
 #[test]
 fn test_br_l() {
-    let mut parser = Parser::new(Lexer::new("b =foo"));
+    let mut parser = Parser::new(Lexer::mem("b =foo"));
     assert_eq!(
         vec!(Instr(vec!(), BrL("foo".to_string()))),
         parser.parse_program());
@@ -601,7 +601,7 @@ fn test_br_l() {
 
 #[test]
 fn test_br_lnk_r() {
-    let mut parser = Parser::new(Lexer::new("bl lr"));
+    let mut parser = Parser::new(Lexer::mem("bl lr"));
     assert_eq!(
         vec!(Instr(vec!(), BrLnkR(Register::Spec("lr".to_string())))),
         parser.parse_program());
@@ -609,7 +609,7 @@ fn test_br_lnk_r() {
 
 #[test]
 fn test_srng() {
-    let mut parser = Parser::new(Lexer::new("srng p0, r0, #0, #1"));
+    let mut parser = Parser::new(Lexer::mem("srng p0, r0, #0, #1"));
     assert_eq!(
         vec!(Instr(vec!(), Srng(Register::Pred(0), Register::Gen(0), Some(0), Some(1)))),
         parser.parse_program());
@@ -617,7 +617,7 @@ fn test_srng() {
 
 #[test]
 fn test_urng() {
-    let mut parser = Parser::new(Lexer::new("urng p0, r0, #0, *"));
+    let mut parser = Parser::new(Lexer::mem("urng p0, r0, #0, *"));
     assert_eq!(
         vec!(Instr(vec!(), Urng(Register::Pred(0), Register::Gen(0), Some(0), None))),
         parser.parse_program());
@@ -625,13 +625,13 @@ fn test_urng() {
 
 #[test]
 fn test_halt() {
-    let mut parser = Parser::new(Lexer::new("halt"));
+    let mut parser = Parser::new(Lexer::mem("halt"));
     assert_eq!(vec!(Instr(vec!(), Halt)), parser.parse_program());
 }
 
 #[test]
 fn test_raw_cmd() {
-    let mut parser = Parser::new(Lexer::new("raw foo bar baz"));
+    let mut parser = Parser::new(Lexer::mem("raw foo bar baz"));
     assert_eq!(
         vec!(Instr(vec!(), RawCmd(vec!(), "foo bar baz".to_string()))),
         parser.parse_program());
@@ -640,7 +640,7 @@ fn test_raw_cmd() {
 #[test]
 fn test_raw_cmd_outs() {
     use ast::CommandBlockOut::*;
-    let mut parser = Parser::new(Lexer::new("raw~siq r0, r1, r2, foo bar baz"));
+    let mut parser = Parser::new(Lexer::mem("raw~siq r0, r1, r2, foo bar baz"));
     let outs = vec!(
         (SuccessCount, Register::Gen(0)),
         (AffectedItems, Register::Gen(1)),
@@ -652,7 +652,7 @@ fn test_raw_cmd_outs() {
 
 #[test]
 fn test_raw_cmd_cond() {
-    let mut parser = Parser::new(Lexer::new("{p0, #1, #1} raw foo bar baz"));
+    let mut parser = Parser::new(Lexer::mem("{p0, #1, #1} raw foo bar baz"));
     assert_eq!(
         vec!(Instr(
             vec!(Cond::eq(Register::Pred(0), 1)),

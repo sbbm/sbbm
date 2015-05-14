@@ -62,7 +62,7 @@ fn main() {
     let mut file = File::open(Path::new(&args.arg_source[..])).unwrap();
     let mut input = String::new();
     if let Ok(_) = file.read_to_string(&mut input) {
-        let mut parser = Parser::new(Lexer::new(&input[..]));
+        let mut parser = Parser::new(Lexer::new(&input[..], &args.arg_source[..]));
         let stmts = parser.parse_program();
 
         // FIXME: Check for warnings/errors before starting to place blocks.

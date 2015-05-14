@@ -2,6 +2,7 @@ use self::Token::*;
 
 use regex::Regex;
 use std::collections::VecDeque;
+use std::fmt;
 
 // FIXME: Work out the lifetime issues and use &'a str for value, then
 //        re-derive Copy.
@@ -30,6 +31,7 @@ pub enum Token {
     Def(String, String),
     Raw(Vec<(char, Token)>, String),
     Eof,
+    Error,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +48,12 @@ pub struct Location {
     pub line: usize,
 }
 
+impl fmt::Display for Location {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}:{}", self.line + 1, self.col + 1)
+    }
+}
+
 pub type SpannedToken = Spanned<Token, Location>;
 
 pub type LexResult<T> = Result<T, String>;
@@ -53,19 +61,22 @@ struct StateFn(fn(&mut Lexer) -> StateFn);
 
 pub struct Lexer<'a> {
     input: &'a str,
+    filename: &'a str,
     pos: usize,
     width: usize,
     mark: Location,
     state: StateFn,
-    tokbuf: VecDeque<SpannedToken>,
+    tokbuf: VecDeque<LexResult<SpannedToken>>,
     line: usize,
+
     line_start: usize,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Lexer<'a> {
+    pub fn new(input: &'a str, filename: &'a str) -> Lexer<'a> {
         Lexer {
             input: input,
+            filename: filename,
             pos: 0,
             width: 0,
             mark: Location { offset: 0, col: 0, line: 0 },
@@ -76,12 +87,18 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn mem(input: &'a str) -> Lexer<'a> {
+        Lexer::new(input, "<memory>")
+    }
+
     pub fn next(&mut self) -> LexResult<SpannedToken> {
-        while self.tokbuf.is_empty() {
+        loop {
+            if let Some(tok) = self.tokbuf.pop_front() {
+                return tok;
+            }
             let StateFn(f) = self.state;
             self.state = f(self);
         }
-        Ok(self.tokbuf.pop_front().unwrap())
     }
 
     fn rest(&self) -> &str {
@@ -93,8 +110,6 @@ impl<'a> Lexer<'a> {
         &self.input[self.mark.offset..end]
     }
 
-    // FIXME: Then reimplement accept_any and accept_char in terms of
-    //        this method.
     fn accept<Pred>(&mut self, pred: Pred) -> Option<char>
         where Pred : FnOnce(char) -> LexResult<()>
     {
@@ -140,8 +155,16 @@ impl<'a> Lexer<'a> {
             start: self.mark,
             end: end,
         };
-        self.tokbuf.push_back(spanned);
+        self.tokbuf.push_back(Ok(spanned));
         self.mark = end
+    }
+
+    // FIXME: Switch to a nicer error type than String.
+    fn error(&mut self, msg: String) {
+        let err = format!(
+            "{}:{}: {} {}", self.filename, self.mark, self.loc(), msg);
+        self.tokbuf.push_back(Err(err));
+        self.mark = self.loc();
     }
 
     fn skip(&mut self) {
@@ -198,6 +221,17 @@ impl<'a> Lexer<'a> {
     }
 }
 
+macro_rules! try_lex {
+    ($lexer:expr, $e:expr) => {
+        match $e {
+            Ok(item) => item,
+            Err(msg) => {
+                $lexer.error(msg);
+                return StateFn(lex_error);
+            }
+        }
+    }
+}
 
 fn is_whitespace(c: char) -> LexResult<()> {
     if c.is_whitespace() {
@@ -242,6 +276,31 @@ fn is_not_newline(c: char) -> LexResult<()> {
     }
 }
 
+fn is_selector_start(c: char) -> LexResult<()> {
+    match c {
+        'a' | 'p' | 'r' | 'e' => Ok (()),
+        _ => Err("".to_string())
+    }
+}
+
+static GEN_REG_REGEX : Regex = regex!(r"^r\d+$");
+static PRED_REG_REGEX : Regex = regex!(r"^p\d+$");
+
+fn classify_register(s: &str) -> Option<Token> {
+    if GEN_REG_REGEX.is_match(s) {
+        let reg = s.to_string();
+        Some(GenReg(reg))
+    } else if PRED_REG_REGEX.is_match(s) {
+        let reg = s.to_string();
+        Some(PredReg(reg))
+    } else if s == "lr" {
+        let reg = s.to_string();
+        Some(SpecReg(reg))
+    } else {
+        None
+    }
+}
+
 fn lex_start(lexer: &mut Lexer) -> StateFn {
     match lexer.rest().chars().next() {
         None => StateFn(lex_end),
@@ -267,85 +326,59 @@ fn lex_start(lexer: &mut Lexer) -> StateFn {
 }
 
 fn lex_lit_str(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect_char('"').unwrap();
+    try_lex!(lexer, lexer.expect_char('"'));
     // FIXME: support escapes
     lexer.zero_or_more(|c| if c != '"' {
         Ok(())
     } else {
         Err("".to_string())
     });
+    try_lex!(lexer, lexer.expect_char('"'));
 
-    // FIXME: try!
-    lexer.expect_char('"').unwrap();
     let litstr = lexer.piece().to_string();
     lexer.emit(LitStr(litstr));
     StateFn(lex_start)
 }
 
 fn lex_lit_int(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect_char('#').unwrap();
+    try_lex!(lexer, lexer.expect_char('#'));
     lexer.accept_char('-');
-    // FIXME: try!
-    lexer.one_or_more(is_digit).unwrap();
+    try_lex!(lexer, lexer.one_or_more(is_digit));
+
     let litint = lexer.piece().to_string();
     lexer.emit(LitInt(litint));
     StateFn(lex_start)
 }
 
 fn lex_selector_or_attr(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect_char('@').unwrap();
+    try_lex!(lexer, lexer.expect_char('@'));
 
-    if let Some(_) = lexer.accept(move |c| match c {
-        'a' | 'p' | 'r' | 'e' => Ok (()),
-        _ => Err("".to_string())
-    }) {
+    if let Some(_) = lexer.accept(is_selector_start) {
         if lexer.accept(is_ident_rest).is_some() {
             lexer.zero_or_more(is_ident_rest);
             let attr = lexer.piece().to_string();
             lexer.emit(Attr(attr));
         } else {
             if lexer.accept_char('[') {
+                // FIXME: Support quoted ]
                 lexer.zero_or_more(|c| if c != ']' { Ok (()) } else { Err("".to_string()) });
-                // FIXME: try!
-                lexer.expect_char(']').unwrap();
+                try_lex!(lexer, lexer.expect_char(']'));
             }
             let selector = lexer.piece().to_string();
             lexer.emit(Selector(selector));
         }
     } else {
-        // FIXME: try!
-        lexer.expect(is_ident_start).unwrap();
+        try_lex!(lexer, lexer.expect(is_ident_start));
         lexer.zero_or_more(is_ident_rest);
+
         let attr = lexer.piece().to_string();
         lexer.emit(Attr(attr));
     }
     StateFn(lex_start)
 }
 
-static GEN_REG_REGEX : Regex = regex!(r"^r\d+$");
-static PRED_REG_REGEX : Regex = regex!(r"^p\d+$");
-
-fn classify_register(s: &str) -> Option<Token> {
-    if GEN_REG_REGEX.is_match(s) {
-        let reg = s.to_string();
-        Some(GenReg(reg))
-    } else if PRED_REG_REGEX.is_match(s) {
-        let reg = s.to_string();
-        Some(PredReg(reg))
-    } else if s == "lr" {
-        let reg = s.to_string();
-        Some(SpecReg(reg))
-    } else {
-        None
-    }
-}
-
 fn lex_ident_like(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect(is_ident_start).unwrap();
+    try_lex!(lexer, lexer.expect(is_ident_start));
     lexer.zero_or_more(is_ident_rest);
     if lexer.accept_char(':') {
         let label = lexer.piece().to_string();
@@ -372,20 +405,17 @@ fn lex_ident_like(lexer: &mut Lexer) -> StateFn {
 fn lex_def(lexer: &mut Lexer) -> StateFn {
     // FIXME: Assert that lexer.piece() == "def"
     lexer.skip();
-    // FIXME: try!
-    lexer.one_or_more(is_whitespace).unwrap();
+    try_lex!(lexer, lexer.one_or_more(is_whitespace));
     lexer.skip();
 
-    // FIXME: try!
-    lexer.expect(is_ident_start).unwrap();
+    try_lex!(lexer, lexer.expect(is_ident_start));
     lexer.zero_or_more(is_ident_rest);
 
     let name = lexer.piece().to_string();
     lexer.skip();
 
     lexer.zero_or_more(is_whitespace);
-    // FIXME: try!
-    lexer.expect_char(',').unwrap();
+    try_lex!(lexer, lexer.expect_char(','));
     lexer.zero_or_more(is_whitespace);
     lexer.skip();
 
@@ -410,8 +440,7 @@ fn lex_raw(lexer: &mut Lexer) -> StateFn {
         lexer.skip();
     }
 
-    // FIXME: try!
-    lexer.one_or_more(is_whitespace).unwrap();
+    try_lex!(lexer, lexer.one_or_more(is_whitespace));
     lexer.skip();
 
     let mut outs = vec!();
@@ -419,22 +448,21 @@ fn lex_raw(lexer: &mut Lexer) -> StateFn {
         lexer.zero_or_more(is_whitespace);
         lexer.skip();
 
-        // FIXME: try!
-        lexer.expect(is_ident_start).unwrap();
+        try_lex!(lexer, lexer.expect(is_ident_start));
         lexer.zero_or_more(is_ident_rest);
         if let Some(reg) = classify_register(lexer.piece()) {
             outs.push((c, reg));
             lexer.skip();
         } else {
-            // FIXME: try!
-            panic!("expected register but found '{}'", lexer.piece());
+            let err = format!("expected register but found '{}'", lexer.piece());
+            lexer.error(err);
+            return StateFn(lex_error)
         }
 
         lexer.zero_or_more(is_whitespace);
         lexer.skip();
 
-        // FIXME: try!
-        lexer.expect_char(',').unwrap();
+        try_lex!(lexer, lexer.expect_char(','));
     }
 
     lexer.zero_or_more(is_whitespace);
@@ -448,39 +476,40 @@ fn lex_raw(lexer: &mut Lexer) -> StateFn {
 }
 
 fn lex_label_ref(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect_char('=').unwrap();
-    // FIXME: try!
-    lexer.expect(is_ident_start).unwrap();
+    try_lex!(lexer, lexer.expect_char('='));
+    try_lex!(lexer, lexer.expect(is_ident_start));
     lexer.zero_or_more(is_ident_rest);
+
     let label_ref = lexer.piece().to_string();
     lexer.emit(LabelRef(label_ref));
-
     StateFn(lex_start)
 }
 
 fn lex_whitespace(lexer: &mut Lexer) -> StateFn {
-    lexer.one_or_more(is_whitespace).unwrap();
+    try_lex!(lexer, lexer.one_or_more(is_whitespace));
     lexer.skip();
+
     StateFn(lex_start)
 }
 
 fn lex_newline(lexer: &mut Lexer) -> StateFn {
     lexer.accept_char('\r');
-    // FIXME: try!
-    lexer.expect_char('\n').unwrap();
+    try_lex!(lexer, lexer.expect_char('\n'));
+
     let newline = lexer.piece().to_string();
     lexer.emit(Newline(newline));
+
     lexer.line += 1;
     lexer.line_start = lexer.pos;
+
     StateFn(lex_start)
 }
 
 fn lex_comment(lexer: &mut Lexer) -> StateFn {
-    // FIXME: try!
-    lexer.expect_char(';').unwrap();
+    try_lex!(lexer, lexer.expect_char(';'));
     lexer.zero_or_more(is_not_newline);
     lexer.skip();
+
     StateFn(lex_start)
 }
 
@@ -490,9 +519,15 @@ fn lex_end<'a>(lexer: &mut Lexer<'a>) -> StateFn {
     StateFn(lex_end)
 }
 
+#[allow(unconditional_recursion)]
+fn lex_error(lexer: &mut Lexer) -> StateFn {
+    lexer.emit(Error);
+    StateFn(lex_error)
+}
+
 macro_rules! first_tok {
     ($input:expr) => {{
-        let mut lexer = Lexer::new($input);
+        let mut lexer = Lexer::mem($input);
         lexer.next().unwrap().item
     }}
 }
@@ -592,14 +627,14 @@ fn test_special_reg() {
 
 #[test]
 fn test_whitespace() {
-    let mut lexer = Lexer::new("foo \tbar");
+    let mut lexer = Lexer::mem("foo \tbar");
     assert_eq!(lexer.next().unwrap().item, Ident("foo".to_string()));
     assert_eq!(lexer.next().unwrap().item, Ident("bar".to_string()));
 }
 
 #[test]
 fn test_newline() {
-    let mut lexer = Lexer::new("foo\nbar\r\n\n");
+    let mut lexer = Lexer::mem("foo\nbar\r\n\n");
     assert_eq!(lexer.next().unwrap().item, Ident("foo".to_string()));
     assert_eq!(lexer.next().unwrap().item, Newline("\n".to_string()));
     assert_eq!(lexer.next().unwrap().item, Ident("bar".to_string()));
@@ -609,7 +644,7 @@ fn test_newline() {
 
 #[test]
 fn test_comment() {
-    let mut lexer = Lexer::new("; foo\nbar");
+    let mut lexer = Lexer::mem("; foo\nbar");
     assert_eq!(lexer.next().unwrap().item, Newline("\n".to_string()));
     assert_eq!(lexer.next().unwrap().item, Ident("bar".to_string()));
 }
