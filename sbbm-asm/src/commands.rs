@@ -291,8 +291,10 @@ impl fmt::Display for Command {
         use self::Command::*;
 
         match *self {
-            Execute(ref tgt, ref pos, ref cmd) =>
-                write!(f, "execute {} {} {}", tgt, pos, cmd),
+            Execute(ref tgt, ref pos, ref cmd) => {
+                let cmd_str = cmd.to_string();
+                write!(f, "execute {} {} {}", tgt, pos, escape(&cmd_str[..]))
+            }
             Fill(
                 ref min, ref max, ref block_id, ref block_data, ref action,
                 ref data_tag) =>
@@ -337,6 +339,11 @@ impl fmt::Display for Command {
             _ => unimplemented!()
         }
     }
+}
+
+pub fn escape(cmd: &str) -> String {
+    // Replace " with \"
+    str::replace(cmd, "\"", "\\\"")
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -3,7 +3,7 @@ use ast::Op::*;
 use ast::Statement::*;
 use commands::{
     Command, Objective, PlayerOp, Selector, SelectorName, SelectorTeam, Target,
-    Team, players};
+    Team, players, self};
 use commands::Command::*;
 use std::boxed::FnBox;
 use nbt::*;
@@ -764,7 +764,8 @@ fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {
     }
 
     let mut nbt = NbtCompound::new();
-    nbt.insert("Command".to_string(), Nbt::String(final_cmd.to_string()));
+    let cmd_str = commands::escape(&final_cmd.to_string()[..]);
+    nbt.insert("Command".to_string(), Nbt::String(cmd_str));
     // FIXME: Add a flag to control whether TrackOutput is on or off by default.
     nbt.insert("TrackOutput".to_string(), Nbt::Byte(1));
     Block {
