@@ -2,7 +2,7 @@ use ast::{CommandBlockOut, Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
 use commands::{Objective, Target};
-use lexer::{Lexer, SpannedToken, Token};
+use lexer::{Lexer, SpannedToken, Token, unquote};
 use lexer::Token::*;
 use types::Interval;
 
@@ -121,6 +121,10 @@ impl<'a> Parser<'a> {
                 self.accept();
                 Ok(Target::Raw(raw_sel))
             }
+            LitStr(s) => {
+                self.accept();
+                Ok(Target::Raw(unquote(&s[..])))
+            }
             _ => {
                 // FIXME: Move to Display, rather than Debug
                 Err(format!("expected selector but found {:?}", self.cur()))
@@ -168,6 +172,7 @@ impl<'a> Parser<'a> {
     fn parse_objective(&mut self) -> ParseResult<String> {
         match self.cur().item {
             Ident(obj) => { self.accept(); Ok(obj) }
+            LitStr(s) => { self.accept(); Ok(unquote(&s[..])) }
             // FIXME: Print with Display, rather than Debug
             _ => Err(format!("expected objective but found {:?}", self.cur())),
         }
@@ -657,5 +662,24 @@ fn test_raw_cmd_cond() {
         vec!(Instr(
             vec!(Cond::eq(Register::Pred(0), 1)),
             RawCmd(vec!(), "foo bar baz".to_string()))),
+        parser.parse_program());
+}
+
+
+#[test]
+fn test_parse_strlit_target() {
+    let mut parser = Parser::new(Lexer::mem("add \"#computer\", foo, #10, r0"));
+    assert_eq!(
+        vec!(Instr(vec!(), AddXI(
+            Target::Raw("#computer".to_string()), "foo".to_string(), 10, Register::Gen(0)))),
+        parser.parse_program());
+}
+
+#[test]
+fn test_parse_strlit_objective() {
+    let mut parser = Parser::new(Lexer::mem("add foo, \"bar\", #10, r0"));
+    assert_eq!(
+        vec!(Instr(vec!(), AddXI(
+            Target::Raw("foo".to_string()), "bar".to_string(), 10, Register::Gen(0)))),
         parser.parse_program());
 }

@@ -221,6 +221,12 @@ impl<'a> Lexer<'a> {
     }
 }
 
+pub fn unquote(s: &str) -> String {
+    // FIXME: Process escape codes, verify existence of opening and closing ",
+    //        return Option<String> or a Result type.
+    s[1..s.len()-1].to_string()
+}
+
 macro_rules! try_lex {
     ($lexer:expr, $e:expr) => {
         match $e {
