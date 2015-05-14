@@ -133,6 +133,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             SremRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Rem, &src),
             UremRR(dst, src) => self.emit_urem(conds, dst, src),
             Srng(dst, tst, min, max) => self.emit_srng(conds, dst, tst, min, max),
+            Urng(dst, tst, min, max) => self.emit_urng(conds, dst, tst, min, max),
             BrL(label) => self.emit_br_l(conds, label),
             BrR(reg) => self.emit_br_r(conds, reg),
             RawCmd(outs, cmd) => {
@@ -384,6 +385,28 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         &mut self, conds: Vec<Cond>, dst: Register, test: Register,
         min: Option<i32>, max: Option<i32>)
     {
+        let one_conds = {
+            let mut c = conds.clone();
+            if let Some(interval) = Interval::new(min, max) {
+                c.push(Cond::new(test, interval));
+            } else {
+                // TODO: Issue a warning.
+            }
+            c };
+
+        self.emit_rset(&conds, &dst, 0);
+        self.emit_rset(&one_conds, &dst, 1);
+    }
+
+    fn emit_urng(
+        &mut self, conds: Vec<Cond>, dst: Register, test: Register,
+        min: Option<u32>, max: Option<u32>)
+    {
+        // FIXME: Break the urng into two srng when necessary.  This coercion is
+        // very unsafe.
+        let min = min.map(|x| x as i32);
+        let max = max.map(|x| x as i32);
+
         let one_conds = {
             let mut c = conds.clone();
             if let Some(interval) = Interval::new(min, max) {
