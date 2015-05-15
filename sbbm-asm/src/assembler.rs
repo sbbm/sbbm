@@ -12,6 +12,7 @@ use types::{self, Block, Extent, Interval, REL_ZERO};
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::mem;
+use std::{i32, u32};
 
 use self::AssembledItem::*;
 
@@ -385,10 +386,18 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         &mut self, conds: Vec<Cond>, dst: Register, test: Register,
         min: Option<i32>, max: Option<i32>)
     {
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        let safe_test = if dst == test {
+            self.emit_rr(&conds, &t0, PlayerOp::Asn, &test);
+            t0
+        } else {
+            test
+        };
+
         let one_conds = {
             let mut c = conds.clone();
             if let Some(interval) = Interval::new(min, max) {
-                c.push(Cond::new(test, interval));
+                c.push(Cond::new(safe_test, interval));
             } else {
                 // TODO: Issue a warning.
             }
@@ -402,22 +411,48 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         &mut self, conds: Vec<Cond>, dst: Register, test: Register,
         min: Option<u32>, max: Option<u32>)
     {
-        // FIXME: Break the urng into two srng when necessary.  This coercion is
-        // very unsafe.
-        let min = min.map(|x| x as i32);
-        let max = max.map(|x| x as i32);
+        let min = min.unwrap_or(u32::MIN);
+        let max = max.unwrap_or(u32::MAX);
 
-        let one_conds = {
-            let mut c = conds.clone();
-            if let Some(interval) = Interval::new(min, max) {
-                c.push(Cond::new(test, interval));
+        if min <= (i32::MAX as u32) && max <= (i32::MAX as u32) {
+            // If min and max are in the range of [0, i32::MAX], emit an
+            // ordinary srng.
+            let min = Some(min as i32);
+            let max = if max == (i32::MAX as u32) { None } else { Some(max as i32) };
+            self.emit_srng(conds, dst, test, min, max);
+        } else if min > (i32::MAX as u32) && max > (i32::MAX as u32) {
+            // If min and max are both greater than i32::MAX, flip them to
+            // negative and emit an ordinary (negative) srng.
+
+            let min = min as i32;
+            let min = if min == i32::MIN { None } else { Some(min) };
+            let max = Some(max as i32);
+            self.emit_srng(conds, dst, test, min, max);
+        } else {
+            // All other ranges (except invalid ones where min > max, which are
+            // undefined behavior) require two signed ranges.
+            let t0 = Register::Spec(self.obj_tmp0.clone());
+            let safe_test = if dst == test {
+                self.emit_rr(&conds, &t0, PlayerOp::Asn, &dst);
+                t0
             } else {
-                // TODO: Issue a warning.
-            }
-            c };
+                test
+            };
 
-        self.emit_rset(&conds, &dst, 0);
-        self.emit_rset(&one_conds, &dst, 1);
+            let a_conds = {
+                let mut c = conds.clone();
+                c.push(Cond::new(safe_test.clone(), Interval::Bounded(min as i32, i32::MAX)));
+                c };
+
+            let b_conds = {
+                let mut c = conds.clone();
+                c.push(Cond::new(safe_test, Interval::Bounded(i32::MIN, max as i32)));
+                c };
+
+            self.emit_rset(&conds, &dst, 0);
+            self.emit_rset(&a_conds, &dst, 1);
+            self.emit_rset(&b_conds, &dst, 1);
+        }
     }
 
     fn emit_br_l(&mut self, conds: Vec<Cond>, label: String) {
@@ -774,7 +809,6 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
             }
         }))
     }
-
 }
 
 fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {

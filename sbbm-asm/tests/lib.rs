@@ -16,7 +16,7 @@ use sbbm_asm::parser::Parser;
 use sbbm_asm::types::{Extent, Vec3};
 
 use std::env;
-use std::i32;
+use std::{i32, u32};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
@@ -289,7 +289,7 @@ fn test_urem() {
 
     let target = computer_target();
     let values = [
-        //i32::MIN, -1234568, -1234567, -33, -32, -3, -2,
+        i32::MIN, -1234568, -1234567, -33, -32, -3, -2,
         -1,
         1, 2, 3, 32, 33, 1234567, 1234568, i32::MAX];
 
@@ -441,6 +441,33 @@ mov r1, #{}
 lsl r0, r1", value, amount)[..]);
 
             assert_eq!(value << amount, get(&target, "r0").unwrap());
+        }
+    }
+}
+
+#[test]
+fn test_urng() {
+    lock_server!();
+
+    let data = [
+        ((0u32, 100u32),
+         vec!((0, 1), (10, 1), (100, 1), (-1, 0), (500, 0))),
+        ((u32::MAX - 2, u32::MAX),
+         vec!((-4, 0), (-3, 1), (-2, 1), (-1, 1), (0, 0))),
+        // TODO: The values used to test split ranges could be better.
+        ((1u32 << 30, 1u32 << 31),
+         vec!((-1, 0), (i32::MAX, 1), (i32::MIN, 1))),
+    ];
+
+    let target = computer_target();
+    for &((min, max), ref in_outs) in data.iter() {
+        for &(input, output) in in_outs.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+urng r0, r0, #{}, #{}", input, min, max)[..]);
+
+            assert_eq!(output, get(&target, "r0").unwrap());
         }
     }
 }
