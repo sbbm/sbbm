@@ -18,15 +18,16 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 
 static USAGE : &'static str = "
-usage: sbbm-asm [-l LAYOUT] [-b BOOT] [-u UNDO] [-o OUTPUT] <x> <y> <z> <source>
+usage: sbbm-asm [-l LAYOUT] [-b BOOT] [-d DESTROY] [-o OUTPUT] <x> <y> <z> <source>
 
 Options:
     -o, --output OUTPUT    Output file.
     -l, --layout LAYOUT    Layout kind (packed or linear).
     -b, --boot BOOT        A filename that will be used to write out the
                            commands needed to boot up the assembled circuit.
-    -u, --undo UNDO        A filename that will be used to write out a list of
-                           commands that undo the work performed during assembly.
+    -d, --destroy DESTROY  A filename that will be used to write out a list of
+                           commands that destroy the blocks and entities created
+                           during assembly and initialization.
 ";
 
 #[derive(Debug, RustcDecodable)]
@@ -38,7 +39,7 @@ struct Args {
     flag_output: Option<String>,
     flag_layout: Option<LayoutKind>,
     flag_boot: Option<String>,
-    flag_undo: Option<String>,
+    flag_destroy: Option<String>,
 }
 
 #[derive(RustcDecodable, Debug)]
@@ -83,8 +84,8 @@ fn main() {
                 Some(Nbt::Compound(block.nbt)))).unwrap();
         }
 
-        if let Some(undo) = args.flag_undo {
-            let mut f = File::create(Path::new(&undo[..])).unwrap();
+        if let Some(destroy) = args.flag_destroy {
+            let mut f = File::create(Path::new(&destroy[..])).unwrap();
             if let Extent::MinMax(min, max) = extent {
                 let cmd = Command::Fill(
                     min.as_abs(), max.as_abs(),
