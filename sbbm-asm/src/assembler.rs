@@ -460,12 +460,12 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         let cont_label = format!("{}_cont_{}", label, self.unique);
         self.unique += 1;
 
-        let test_reg = Register::Spec("TEST".to_string());
-        self.emit_rset(&vec!(), &test_reg, 0);
-        self.emit_rset(&conds, &test_reg, 1);
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        self.emit_rset(&vec!(), &t0, 0);
+        self.emit_rset(&conds, &t0, 1);
 
         let selector = self.selector.clone();
-        let test_reg_copy = test_reg.clone();
+        let t0_copy = t0.clone();
         self.emit(Pending(label, Box::new(move |extent| {
             match extent {
                 Extent::Empty => {
@@ -473,7 +473,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 }
                 Extent::MinMax(min, max) => {
                     make_cmd_block(
-                        selector, vec!(Cond::eq(test_reg_copy, 1)),
+                        selector, vec!(Cond::eq(t0_copy, 1)),
                         Fill(
                             min.as_abs(), max.as_abs(),
                             "minecraft:redstone_block".to_string(),
@@ -483,7 +483,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         })));
 
         let selector = self.selector.clone();
-        let test_reg_copy = test_reg.clone();
+        let t0_copy = t0.clone();
         self.emit(Pending(cont_label.clone(), Box::new(move |extent| {
             match extent {
                 Extent::Empty => {
@@ -491,7 +491,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
                 }
                 Extent::MinMax(min, max) => {
                     make_cmd_block(
-                        selector, vec!(Cond::eq(test_reg_copy, 0)),
+                        selector, vec!(Cond::eq(t0_copy, 0)),
                         Fill(
                             min.as_abs(), max.as_abs(),
                             "minecraft:redstone_block".to_string(),

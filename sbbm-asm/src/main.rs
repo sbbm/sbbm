@@ -190,8 +190,7 @@ fn init_destroy_regs(
     let special_regs = [
         ("ZERO", 0),
         ("TWO", 2),
-        ("MIN", i32::MIN),
-        ("TEST", 0)];
+        ("MIN", i32::MIN)];
 
     // Special registers (implementation details)
     for &(name, value) in special_regs.iter() {
