@@ -125,6 +125,7 @@ fn init_computer(conn: &mut CommandWrite, origin: Vec3) -> io::Result<()> {
     let pos = origin.as_abs();
     let mut data_tag = NbtCompound::new();
     data_tag.insert("CustomName".to_string(), Nbt::String("computer".to_string()));
+    data_tag.insert("NoGravity".to_string(), Nbt::Byte(1));
     try!(conn.write_cmd(&Command::Summon(
         "ArmorStand".to_string(), Some(pos),
         Some(Nbt::Compound(data_tag)))));
@@ -202,6 +203,7 @@ fn init_bitwise(conn: &mut CommandWrite, origin: Vec3) -> io::Result<()> {
         let pos = Pos3::abs(origin.x, origin.y, origin.z + i);
         let mut data_tag = NbtCompound::new();
         data_tag.insert("CustomName".to_string(), Nbt::String(name));
+        data_tag.insert("NoGravity".to_string(), Nbt::Byte(1));
         try!(conn.write_cmd(&Command::Summon(
             "ArmorStand".to_string(), Some(pos),
             Some(Nbt::Compound(data_tag)))));
