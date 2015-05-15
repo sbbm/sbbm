@@ -2,7 +2,7 @@ extern crate docopt;
 extern crate rustc_serialize;
 extern crate sbbm_asm;
 
-use sbbm_asm::assembler::Assembler;
+use sbbm_asm::assembler::{Assembler, AssembledItem};
 use sbbm_asm::commands::{
     Command, Selector, SelectorName, SelectorTeam, Target,
     objectives, players, teams};
@@ -18,11 +18,15 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 
 static USAGE : &'static str = "
-usage: sbbm-asm [-l LAYOUT] [-b BOOT] [-d DESTROY] [-o OUTPUT] <x> <y> <z> <source>
+usage: sbbm-asm [-l LAYOUT] [-k INIT] [-b BOOT] [-d DESTROY] [-o OUTPUT] <x> <y> <z> <source>
 
 Options:
     -o, --output OUTPUT    Output file.
     -l, --layout LAYOUT    Layout kind (packed or linear).
+    -k, --init INIT        A filename that will be used to write out the
+                           commands needed to initialize the circuit.  (Creates
+                           the necessary entities and objectives, and performs
+                           other one-time work.)
     -b, --boot BOOT        A filename that will be used to write out the
                            commands needed to boot up the assembled circuit.
     -d, --destroy DESTROY  A filename that will be used to write out a list of
@@ -38,6 +42,7 @@ struct Args {
     arg_source: String,
     flag_output: Option<String>,
     flag_layout: Option<LayoutKind>,
+    flag_init: Option<String>,
     flag_boot: Option<String>,
     flag_destroy: Option<String>,
 }
@@ -75,58 +80,52 @@ fn main() {
         };
         let mut layout = Layout::new(motion, assembler);
 
-        init_computer(&mut output, origin).unwrap();
         let mut extent = Extent::Empty;
         for (pos, block) in &mut layout {
             extent.add(pos);
-            output.exec(&Command::SetBlock(
+            output.write_cmd(&Command::SetBlock(
                 pos.as_abs(), block.id, None, None,
                 Some(Nbt::Compound(block.nbt)))).unwrap();
         }
 
+        if let Some(init) = args.flag_init {
+            let mut f = File::create(Path::new(&init[..])).unwrap();
+            init_computer(&mut f, origin).unwrap();
+        }
+
         if let Some(destroy) = args.flag_destroy {
             let mut f = File::create(Path::new(&destroy[..])).unwrap();
-            if let Extent::MinMax(min, max) = extent {
-                let cmd = Command::Fill(
-                    min.as_abs(), max.as_abs(),
-                    "minecraft:air".to_string(), None, None, None);
-                write!(f, "{}\n", cmd).unwrap();
-            }
+            destroy_computer(&mut f, extent);
         }
 
         if let Some(boot) = args.flag_boot {
             let mut f = File::create(Path::new(&boot[..])).unwrap();
-            if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
-                let cmd = Command::Fill(
-                    min.as_abs(), max.as_abs(),
-                    "minecraft:redstone_block".to_string(), None, None, None);
-                write!(f, "{}\n", cmd).unwrap();
-            }
+            boot_computer(&mut f, &layout);
         }
     }
 }
 
-trait MinecraftConn {
-    fn exec(&mut self, cmd: &Command) -> io::Result<()>;
+trait CommandWrite {
+    fn write_cmd(&mut self, cmd: &Command) -> io::Result<()>;
 }
 
-impl<W : Write> MinecraftConn for W {
-    fn exec(&mut self, cmd: &Command) -> io::Result<()> {
+impl<W : Write> CommandWrite for W {
+    fn write_cmd(&mut self, cmd: &Command) -> io::Result<()> {
         write!(self, "{}\n", cmd)
     }
 }
 
-fn init_computer(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
+fn init_computer(conn: &mut CommandWrite, origin: Vec3) -> io::Result<()> {
     let comp_tgt = Target::Sel(Selector {
         name: Some(SelectorName::Is("computer".to_string())),
         ..Selector::entity()
     });
 
-    try!(conn.exec(&Command::Kill(comp_tgt.clone())));
+    try!(conn.write_cmd(&Command::Kill(comp_tgt.clone())));
     let pos = origin.as_abs();
     let mut data_tag = NbtCompound::new();
     data_tag.insert("CustomName".to_string(), Nbt::String("computer".to_string()));
-    try!(conn.exec(&Command::Summon(
+    try!(conn.write_cmd(&Command::Summon(
         "ArmorStand".to_string(), Some(pos),
         Some(Nbt::Compound(data_tag)))));
 
@@ -136,51 +135,51 @@ fn init_computer(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
     Ok(())
 }
 
-fn init_registers(conn: &mut MinecraftConn, comp_tgt: Target) -> io::Result<()> {
+fn init_registers(conn: &mut CommandWrite, comp_tgt: Target) -> io::Result<()> {
     // General registers
     for i in (0..32) {
         let obj = format!("r{}", i);
 
-        try!(conn.exec(&objectives::remove(obj.clone())));
-        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(conn.exec(&players::set(comp_tgt.clone(), obj, 0, None)));
+        try!(conn.write_cmd(&objectives::remove(obj.clone())));
+        try!(conn.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.write_cmd(&players::set(comp_tgt.clone(), obj, 0, None)));
     }
 
     // Predicate registers
     for i in (0..8) {
         let obj = format!("p{}", i);
 
-        try!(conn.exec(&objectives::remove(obj.clone())));
-        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(conn.exec(&players::set(comp_tgt.clone(), obj, 0, None)));
+        try!(conn.write_cmd(&objectives::remove(obj.clone())));
+        try!(conn.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.write_cmd(&players::set(comp_tgt.clone(), obj, 0, None)));
     }
 
     // Temp registers (implementation details)
     for i in (0..4) {
         let obj = format!("t{}", i);
 
-        try!(conn.exec(&objectives::remove(obj.clone())));
-        try!(conn.exec(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(conn.exec(&players::set(comp_tgt.clone(), obj, 0, None)));
+        try!(conn.write_cmd(&objectives::remove(obj.clone())));
+        try!(conn.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
+        try!(conn.write_cmd(&players::set(comp_tgt.clone(), obj, 0, None)));
     }
 
     // Special registers (implementation details)
     for name in ["ZERO", "TWO", "MIN", "TEST"].iter() {
         let obj = name.to_string();
-        try!(conn.exec(&objectives::remove(obj.clone())));
-        try!(conn.exec(&objectives::add(obj, "dummy".to_string(), None)));
+        try!(conn.write_cmd(&objectives::remove(obj.clone())));
+        try!(conn.write_cmd(&objectives::add(obj, "dummy".to_string(), None)));
     }
 
-    try!(conn.exec(&players::set(comp_tgt.clone(), "ZERO".to_string(), 0, None)));
-    try!(conn.exec(&players::set(comp_tgt.clone(), "TWO".to_string(), 2, None)));
-    try!(conn.exec(&players::set(comp_tgt.clone(), "MIN".to_string(), std::i32::MIN, None)));
+    try!(conn.write_cmd(&players::set(comp_tgt.clone(), "ZERO".to_string(), 0, None)));
+    try!(conn.write_cmd(&players::set(comp_tgt.clone(), "TWO".to_string(), 2, None)));
+    try!(conn.write_cmd(&players::set(comp_tgt.clone(), "MIN".to_string(), std::i32::MIN, None)));
     Ok(())
 }
 
-fn init_bitwise(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
+fn init_bitwise(conn: &mut CommandWrite, origin: Vec3) -> io::Result<()> {
     for obj in ["BitComponent", "BitNumber", "t0", "t1", "t2"].iter() {
-        try!(conn.exec(&objectives::remove(obj.to_string())));
-        try!(conn.exec(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
+        try!(conn.write_cmd(&objectives::remove(obj.to_string())));
+        try!(conn.write_cmd(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
     }
 
     let bit_team = "Shifters".to_string();
@@ -190,7 +189,7 @@ fn init_bitwise(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
         team: Some(SelectorTeam::On(bit_team.clone())),
         ..Selector::entity()
     });
-    try!(conn.exec(&Command::Kill(bit_team_target)));
+    try!(conn.write_cmd(&Command::Kill(bit_team_target)));
     let mut shifters = vec!();
     for i in (0..32) {
         let name = format!("bit_{}", i);
@@ -203,17 +202,39 @@ fn init_bitwise(conn: &mut MinecraftConn, origin: Vec3) -> io::Result<()> {
         let pos = Pos3::abs(origin.x, origin.y, origin.z + i);
         let mut data_tag = NbtCompound::new();
         data_tag.insert("CustomName".to_string(), Nbt::String(name));
-        try!(conn.exec(&Command::Summon(
+        try!(conn.write_cmd(&Command::Summon(
             "ArmorStand".to_string(), Some(pos),
             Some(Nbt::Compound(data_tag)))));
 
-        try!(conn.exec(&players::set(target.clone(), "BitNumber".to_string(), i, None)));
-        try!(conn.exec(&players::set(target, "BitComponent".to_string(), 1 << i, None)));
+        try!(conn.write_cmd(&players::set(target.clone(), "BitNumber".to_string(), i, None)));
+        try!(conn.write_cmd(&players::set(target, "BitComponent".to_string(), 1 << i, None)));
     }
 
-    try!(conn.exec(&teams::remove(bit_team.clone())));
-    try!(conn.exec(&teams::add(bit_team.clone(), None)));
-    try!(conn.exec(&teams::join(bit_team, shifters)));
+    try!(conn.write_cmd(&teams::remove(bit_team.clone())));
+    try!(conn.write_cmd(&teams::add(bit_team.clone(), None)));
+    try!(conn.write_cmd(&teams::join(bit_team, shifters)));
 
     Ok(())
+}
+
+fn destroy_computer(w: &mut CommandWrite, extent: Extent) {
+    // FIXME: Really reverse all the activity in init_computer.
+
+    if let Extent::MinMax(min, max) = extent {
+        let cmd = Command::Fill(
+            min.as_abs(), max.as_abs(),
+            "minecraft:air".to_string(), None, None, None);
+        w.write_cmd(&cmd).unwrap();
+    }
+}
+
+fn boot_computer<Source>(w: &mut CommandWrite, layout: &Layout<Source>)
+    where Source : Iterator<Item=AssembledItem>
+{
+    if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
+        let cmd = Command::Fill(
+            min.as_abs(), max.as_abs(),
+            "minecraft:redstone_block".to_string(), None, None, None);
+        w.write_cmd(&cmd).unwrap();
+    }
 }
