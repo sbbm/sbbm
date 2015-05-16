@@ -201,7 +201,8 @@ impl<'a> Parser<'a> {
         match self.cur().item {
             Ident(mnemonic) => {
                 let res = match &mnemonic[..] {
-                    "ldr" => self.parse_ldr(),
+                    m @ "ldr" => self.parse_ldr_str(m, LdrRR, LdrRL),
+                    m @ "str" => self.parse_ldr_str(m, StrRR, StrRL),
                     m @ "add" => self.parse_addsub(m, AddRR, AddRI, AddXI, AddXR),
                     m @ "sub" => self.parse_addsub(m, SubRR, SubRI, SubXI, SubXR),
                     m @ "and" => self.parse_instr_rr(m, AndRR),
@@ -258,8 +259,12 @@ impl<'a> Parser<'a> {
         Ok(op(dst, src))
     }
 
-    fn parse_ldr(&mut self) -> ParseResult<Op> {
-        try!(self.expect_tok(Ident("ldr".to_string())));
+    fn parse_ldr_str<RR, RL>(
+        &mut self, mnemo: &str, rr: RR, rl: RL) -> ParseResult<Op>
+        where RR : FnOnce(Register, Register) -> Op,
+              RL : FnOnce(Register, String) -> Op,
+    {
+        try!(self.expect_tok(Ident(mnemo.to_string())));
         let dst = try!(self.parse_any_reg());
         try!(self.expect_tok(Comma));
 
@@ -268,15 +273,15 @@ impl<'a> Parser<'a> {
                 self.accept();
                 let src = try!(self.parse_any_reg());
                 try!(self.expect_tok(RBracket));
-                Ok(LdrRR(dst, src))
+                Ok(rr(dst, src))
             }
             LabelRef(lblref) => {
                 let src = lblref[1..].to_string();
                 self.accept();
-                Ok(LdrRL(dst, src))
+                Ok(rl(dst, src))
             }
             // FIXME: Do better with this error message.
-            _ => Err(format!("invalid ldr format {:?}", self.cur())),
+            _ => Err(format!("invalid {} format {:?}", mnemo, self.cur())),
         }
     }
 
@@ -466,6 +471,22 @@ fn test_ldr_rl() {
     let mut parser = Parser::new(Lexer::mem("ldr r0, =foo"));
     assert_eq!(
         vec!(Instr(vec!(), LdrRL(Register::Gen(0), "foo".to_string()))),
+        parser.parse_program());
+}
+
+#[test]
+fn test_str_rr() {
+    let mut parser = Parser::new(Lexer::mem("str r0, [r1]"));
+    assert_eq!(
+        vec!(Instr(vec!(), StrRR(Register::Gen(0), Register::Gen(1)))),
+        parser.parse_program());
+}
+
+#[test]
+fn test_str_rl() {
+    let mut parser = Parser::new(Lexer::mem("str r0, =foo"));
+    assert_eq!(
+        vec!(Instr(vec!(), StrRL(Register::Gen(0), "foo".to_string()))),
         parser.parse_program());
 }
 
