@@ -9,7 +9,7 @@ use regex::Regex;
 use sbbm_asm::assembler::Assembler;
 use sbbm_asm::commands::{
     Command, Selector, SelectorName, Target, players};
-use sbbm_asm::hw::{Computer, MemoryRegion};
+use sbbm_asm::hw::{Computer, MemoryRegion, MemoryStride};
 use sbbm_asm::layout::{Layout, LinearMotion};
 use sbbm_asm::lexer::Lexer;
 use sbbm_asm::nbt::Nbt;
@@ -145,9 +145,10 @@ fn run_asm(input: &str) {
             memory: vec!(
                 MemoryRegion {
                     start: 0x10,
-                    size: 0x8000,
+                    size: 0x1000,
                     origin: Vec3::new(origin.x - 1, origin.y, origin.z),
                     growth: Vec3::new(-1, 1, 1),
+                    stride: MemoryStride::XY(16, 16),
                 })
         };
 

@@ -1,4 +1,4 @@
-use types::{Pos3, Interval, Vec3};
+use types::{Extent, Interval, Pos3, Vec3};
 use nbt::Nbt;
 use std::collections::HashMap;
 use std::fmt;
@@ -284,6 +284,78 @@ pub enum Command {
     Scoreboard(ScoreboardCmd),
     Summon(String, Option<Pos3>, Option<Nbt>),
     Raw(String),
+}
+
+pub fn safe_fill(
+    extent: Extent, id: BlockId, data: Option<BlockData>,
+    action: Option<FillAction>, nbt: Option<Nbt>) -> Vec<Command>
+{
+    use self::Command::Fill;
+
+    #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    enum Axis { X, Y, Z }
+
+    let mut cmds = vec!();
+    if let Extent::MinMax(min, max) = extent {
+        let dx = max.x - min.x + 1;
+        let dy = max.y - min.y + 1;
+        let dz = max.z - min.z + 1;
+
+        let max_fill = 32768;
+
+        if max_fill / dx / dy >= dz {
+            cmds.push(Fill(min.as_abs(), max.as_abs(), id, data, action, nbt));
+        } else {
+            let mut axes = [(dx, Axis::X), (dy, Axis::Y), (dz, Axis::Z)];
+            axes.sort();
+
+            let mut x_size: i32 = 0;
+            let mut y_size: i32 = 0;
+            let mut z_size: i32 = 0;
+            let mut remaining = max_fill;
+            // FIXME: This loop is not making much of an effort to
+            // handle corner cases. Especially cases where the width
+            // should be 1 need to be verified.
+            for &(value, axis) in axes.iter() {
+                let size = if value > remaining { remaining } else { value };
+                remaining /= size;
+
+                match axis {
+                    Axis::X => x_size = size,
+                    Axis::Y => y_size = size,
+                    Axis::Z => z_size = size,
+                }
+            }
+
+            // WHEN(Range::step_by): Use step_by when it becomes stable.
+            let mut x: i32;
+            let mut y: i32;
+            let mut z: i32;
+            x = min.y;
+            while x <= max.x {
+                y = min.y;
+                while y <= max.y {
+                    z = min.z;
+                    while z <= max.z {
+                        let start = Pos3::abs(x, y, z);
+                        let end = Pos3::abs(
+                            x + x_size - 1,
+                            y + y_size - 1,
+                            z + z_size - 1);
+
+                        cmds.push(Fill(
+                            start, end, id.clone(), data, action, nbt.clone()));
+                        z += z_size;
+                    }
+                    y += y_size;
+                }
+                x += x_size;
+            }
+
+            // FIXME: Handle remainders.
+        }
+    }
+    cmds
 }
 
 impl fmt::Display for Command {

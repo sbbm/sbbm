@@ -4,9 +4,9 @@ extern crate sbbm_asm;
 
 use sbbm_asm::assembler::{Assembler, AssembledItem};
 use sbbm_asm::commands::{
-    Command, Selector, SelectorName, SelectorTeam, Target,
+    self, Command, Selector, SelectorName, SelectorTeam, Target,
     objectives, players, teams};
-use sbbm_asm::hw::{Computer, MemoryRegion};
+use sbbm_asm::hw::{Computer, MemoryRegion, MemoryStride};
 use docopt::Docopt;
 use sbbm_asm::layout::{Layout, LayoutMotion, LinearMotion, PackedMotion};
 use sbbm_asm::lexer::Lexer;
@@ -77,8 +77,9 @@ fn main() {
                 MemoryRegion {
                     start: 0x10,
                     size: 0x8000,
-                    origin: Vec3::new(origin.x - 1, origin.y, origin.z),
+                    origin: Vec3::new(origin.x - 1, 0, origin.z),
                     growth: Vec3::new(-1, 1, 1),
+                    stride: MemoryStride::XY(32, 256)
                 })
         };
 
@@ -105,7 +106,8 @@ fn main() {
             let mut init = optional_out(args.flag_init);
             let mut destroy = optional_out(args.flag_destroy);
             write_init_destroy(
-                init.deref_mut(), destroy.deref_mut(), origin, extent).unwrap();
+                init.deref_mut(), destroy.deref_mut(),
+                &computer, origin, extent).unwrap();
         }
 
         if let Some(boot) = args.flag_boot {
@@ -113,6 +115,7 @@ fn main() {
             boot_computer(&mut f, &layout);
         }
     }
+
 }
 
 fn optional_out(path: Option<String>) -> Box<CommandWrite> {
@@ -135,7 +138,7 @@ impl<W : Write> CommandWrite for W {
 
 fn write_init_destroy(
     init: &mut CommandWrite, destroy: &mut CommandWrite,
-    origin: Vec3, extent: Extent) -> io::Result<()>
+    computer: &Computer, origin: Vec3, extent: Extent) -> io::Result<()>
 {
     let comp_tgt = Target::Sel(Selector {
         name: Some(SelectorName::Is("computer".to_string())),
@@ -153,6 +156,7 @@ fn write_init_destroy(
 
     try!(init_destroy_regs(init, destroy, comp_tgt.clone()));
     try!(init_destroy_bitwise(init, destroy, origin));
+    try!(init_destroy_memory(init, destroy, computer));
 
     if let Extent::MinMax(min, max) = extent {
         let cmd = Command::Fill(
@@ -259,6 +263,26 @@ fn init_destroy_bitwise(
     try!(destroy.write_cmd(&Command::Kill(bit_team_target)));
     try!(destroy.write_cmd(&teams::remove(bit_team)));
 
+    Ok(())
+}
+
+fn init_destroy_memory(
+    init: &mut CommandWrite, destroy: &mut CommandWrite, computer: &Computer)
+    -> io::Result<()>
+{
+    for region in computer.memory.iter() {
+        let extent = region.extent();
+
+        let clay = "minecraft:stained_hardened_clay".to_string();
+        for cmd in commands::safe_fill(extent, clay, None, None, None) {
+            try!(init.write_cmd(&cmd));
+        }
+
+        let air = "minecraft:air".to_string();
+        for cmd in commands::safe_fill(extent, air, None, None, None) {
+            try!(destroy.write_cmd(&cmd));
+        }
+    }
     Ok(())
 }
 

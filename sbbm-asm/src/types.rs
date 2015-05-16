@@ -148,6 +148,14 @@ pub enum Extent {
 }
 
 impl Extent {
+    pub fn normalize(&mut self) {
+        if let Extent::MinMax(min, max) = *self {
+            *self = Extent::MinMax(
+                Vec3::min(min, max),
+                Vec3::max(min, max));
+        }
+    }
+
     pub fn add(&mut self, v: Vec3) {
         use self::Extent::*;
 
