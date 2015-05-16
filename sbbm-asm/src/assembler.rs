@@ -5,6 +5,7 @@ use commands::{
     Command, Objective, PlayerOp, Selector, SelectorName, SelectorTeam, Target,
     Team, players, self};
 use commands::Command::*;
+use hw::{Computer, MemoryRegion};
 use std::boxed::FnBox;
 use nbt::*;
 use types::{self, Block, Extent, Interval, REL_ZERO};
@@ -23,6 +24,7 @@ pub enum AssembledItem {
     Complete(Block),
     Pending(String, PendingFn),
     Terminal,
+
 }
 
 impl fmt::Debug for AssembledItem {
@@ -36,7 +38,8 @@ impl fmt::Debug for AssembledItem {
     }
 }
 
-pub struct Assembler<Source : Iterator<Item=Statement>> {
+pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
+    computer: &'c Computer,
     input: Source,
     buffer: VecDeque<AssembledItem>,
     target: Target,
@@ -59,8 +62,8 @@ pub struct Assembler<Source : Iterator<Item=Statement>> {
     obj_min: Objective,
 }
 
-impl<S : Iterator<Item=Statement>> Assembler<S> {
-    pub fn new(assembly: S) -> Assembler<S> {
+impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
+    pub fn new(computer: &'c Computer, assembly: S) -> Assembler<'c, S> {
         let entity_name = "computer".to_string();
         let selector = Selector {
             name: Some(SelectorName::Is(entity_name)),
@@ -69,6 +72,7 @@ impl<S : Iterator<Item=Statement>> Assembler<S> {
         let target = Target::Sel(selector.clone());
         let team_bit = "Shifters";
         Assembler {
+            computer: computer,
             input: assembly,
             buffer: VecDeque::new(),
             target: target,
@@ -851,7 +855,7 @@ fn make_command_stats(
     Nbt::Compound(stats)
 }
 
-impl<S : Iterator<Item=Statement>> Iterator for Assembler<S> {
+impl<'c, S : Iterator<Item=Statement>> Iterator for Assembler<'c, S> {
     type Item = AssembledItem;
 
     fn next(&mut self) -> Option<AssembledItem> {

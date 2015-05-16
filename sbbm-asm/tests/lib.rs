@@ -9,6 +9,7 @@ use regex::Regex;
 use sbbm_asm::assembler::Assembler;
 use sbbm_asm::commands::{
     Command, Selector, SelectorName, Target, players};
+use sbbm_asm::hw::{Computer, MemoryRegion};
 use sbbm_asm::layout::{Layout, LinearMotion};
 use sbbm_asm::lexer::Lexer;
 use sbbm_asm::nbt::Nbt;
@@ -138,9 +139,22 @@ fn run_asm(input: &str) {
         let mut marked = input.to_string();
         marked.push_str("\n\traw say ");
         marked.push_str(marker);
+
+        let origin = Vec3::new(0, 57, 0);
+        let computer = Computer {
+            memory: vec!(
+                MemoryRegion {
+                    start: 0x10,
+                    size: 0x8000,
+                    origin: Vec3::new(origin.x - 1, origin.y, origin.z),
+                    growth: Vec3::new(-1, 1, 1),
+                })
+        };
+
         let mut parser = Parser::new(Lexer::mem(&marked[..]));
-        let assembler = Assembler::new(parser.parse_program().into_iter());
-        let motion = Box::new(LinearMotion::new(Vec3::new(0, 57, 0)));
+        let assembler = Assembler::new(
+            &computer, parser.parse_program().into_iter());
+        let motion = Box::new(LinearMotion::new(origin));
         let mut layout = Layout::new(motion, assembler);
 
         let mut dirty_extent = Extent::Empty;

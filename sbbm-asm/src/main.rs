@@ -6,6 +6,7 @@ use sbbm_asm::assembler::{Assembler, AssembledItem};
 use sbbm_asm::commands::{
     Command, Selector, SelectorName, SelectorTeam, Target,
     objectives, players, teams};
+use sbbm_asm::hw::{Computer, MemoryRegion};
 use docopt::Docopt;
 use sbbm_asm::layout::{Layout, LayoutMotion, LinearMotion, PackedMotion};
 use sbbm_asm::lexer::Lexer;
@@ -70,12 +71,22 @@ fn main() {
     let mut file = File::open(Path::new(&args.arg_source[..])).unwrap();
     let mut input = String::new();
     if let Ok(_) = file.read_to_string(&mut input) {
+        let origin = Vec3::new(args.arg_x, args.arg_y, args.arg_z);
+        let computer = Computer {
+            memory: vec!(
+                MemoryRegion {
+                    start: 0x10,
+                    size: 0x8000,
+                    origin: Vec3::new(origin.x - 1, origin.y, origin.z),
+                    growth: Vec3::new(-1, 1, 1),
+                })
+        };
+
         let mut parser = Parser::new(Lexer::new(&input[..], &args.arg_source[..]));
         let stmts = parser.parse_program();
 
         // FIXME: Check for warnings/errors before starting to place blocks.
-        let assembler = Assembler::new(stmts.into_iter());
-        let origin = Vec3::new(args.arg_x, args.arg_y, args.arg_z);
+        let assembler = Assembler::new(&computer, stmts.into_iter());
         let motion : Box<LayoutMotion> = match args.flag_layout {
             Some(LayoutKind::Linear) => Box::new(LinearMotion::new(origin)),
             Some(LayoutKind::Packed) | None => Box::new(PackedMotion::new(origin)),
