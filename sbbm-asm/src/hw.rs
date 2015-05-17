@@ -20,7 +20,7 @@ pub struct MemoryRegion {
 impl MemoryRegion {
     pub fn extent(&self) -> Extent {
         // TODO: This function assumes that the Y component of MemoryStride is a
-        // multiple of 16 (block-per-byte * bytes-per-word).  This invariant
+        // multiple of 8 (block-per-byte * bytes-per-word).  This invariant
         // should be enforced.
 
         if self.size == 0 {
@@ -28,7 +28,7 @@ impl MemoryRegion {
         }
 
         let blocks_per_byte = 2;
-        let blocks = self.size * blocks_per_byte * 8;
+        let blocks = self.size * blocks_per_byte;
 
         let (x_size, y_size, z_size) = match self.stride {
             MemoryStride::XY(x_size, y_size) =>

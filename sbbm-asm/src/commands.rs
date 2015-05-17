@@ -46,7 +46,6 @@ pub struct Selector {
 }
 
 impl Selector {
-
     pub fn player() -> Selector {
         Selector { kind: SelectorKind::Player, ..Default::default() }
     }
@@ -331,7 +330,7 @@ pub fn safe_fill(
             let mut x: i32;
             let mut y: i32;
             let mut z: i32;
-            x = min.y;
+            x = min.x;
             while x <= max.x {
                 y = min.y;
                 while y <= max.y {
