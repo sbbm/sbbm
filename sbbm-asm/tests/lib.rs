@@ -486,3 +486,28 @@ urng r0, r0, #{}, #{}", input, min, max)[..]);
         }
     }
 }
+
+#[test]
+#[allow(overflowing_literals)]
+fn test_ldr_str() {
+    lock_server!();
+
+    let values = [0xfedcba90, 0x12345678, 1, -1];
+    let addrs = [0x10];
+
+    let target = computer_target();
+    for addr in addrs.iter() {
+        for value in values.iter() {
+            run_asm(&format!("
+main:
+mov r0, #{}
+mov r1, #{}
+str r0, [r1]
+ldr r1, [r1]", value, addr)[..]);
+
+            assert_eq!(*value, get(&target, "r1").unwrap());
+        }
+    }
+
+    assert!(false);
+}

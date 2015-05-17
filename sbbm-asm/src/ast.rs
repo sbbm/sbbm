@@ -37,6 +37,10 @@ impl Cond {
     pub fn ge(reg: Register, value: i32) -> Cond {
         Self::new(reg, Interval::Min(value))
     }
+
+    pub fn bounded(reg: Register, min: i32, max: i32) -> Cond {
+        Self::new(reg, Interval::Bounded(min, max))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

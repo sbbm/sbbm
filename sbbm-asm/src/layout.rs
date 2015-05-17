@@ -191,16 +191,19 @@ impl<Source> Layout<Source>
         }
     }
 
-    fn resolve_pending(&mut self) {
+    fn resolve_pending(&mut self) -> bool {
+        let mut made_progress = false;
         for i in (0..self.pending.len()).rev() {
             match self.resolve_extent(&self.pending[i].0) {
                 Some(extent) => {
                     let (_, pos, func) = self.pending.swap_remove(i);
                     self.emit_raw(pos, func(extent));
+                    made_progress = true;
                 }
                 None => (),
             }
         }
+        made_progress
     }
 
     fn resolve_extent(&self, label: &String) -> Option<Extent> {
@@ -249,8 +252,14 @@ impl<'a, Source> Iterator for &'a mut Layout<Source>
                     }
                 }
             } else if !self.pending.is_empty() {
-                // FIXME: Check that progress is being made.
-                self.resolve_pending();
+                if !self.resolve_pending() {
+                    // If pending blocks are all that remain and no progress was
+                    // made, we are in trouble.
+                    // FIXME: Report errors in a nicer way.
+                    let pending_labels: Vec<&str> =
+                        self.pending.iter().map(|x| &x.0[..]).collect();
+                    panic!("There are unresolved labels: {:?}", pending_labels);
+                }
             } else {
                 break;
             }

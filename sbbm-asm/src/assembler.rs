@@ -60,6 +60,10 @@ pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
     obj_tmp2: Objective,
     obj_two: Objective,
     obj_min: Objective,
+    obj_mem_op: Objective,
+    obj_mem_addr: Objective,
+    obj_mem_data: Objective,
+    obj_mem_tag: Objective,
 }
 
 impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
@@ -98,6 +102,10 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             obj_tmp2: "t2".to_string(),
             obj_two: "TWO".to_string(),
             obj_min: "MIN".to_string(),
+            obj_mem_op: "MemOp".to_string(),
+            obj_mem_addr: "MemAddr".to_string(),
+            obj_mem_data: "MemData".to_string(),
+            obj_mem_tag: "MemTag".to_string(),
         }
     }
 
@@ -112,6 +120,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         use commands::PlayerOp as PlOp;
 
         match op {
+            LdrRR(dst, src) => self.emit_ldr_rr(conds, dst, src),
+            StrRR(src, dst) => self.emit_str_rr(conds, src, dst),
             AddRR(dst, src) => self.emit_rr(&conds, &dst, PlOp::Add, &src),
             AddRI(dst, imm) => self.emit_radd(&conds, &dst, imm),
             AddXR(tgt, obj, src, success) =>
@@ -177,7 +187,16 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                 self.buffer.push_back(item);
             }
         };
+    }
 
+    fn gen_unique_int(&mut self) -> u32 {
+        let value = self.unique;
+        self.unique += 1;
+        value
+    }
+
+    fn gen_unique_label(&mut self, prefix: &str) -> String {
+        format!("{}{}", prefix, self.gen_unique_int())
     }
 
     fn make_op_cmd_rr(
@@ -252,6 +271,163 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             self.selector.clone(), conds.clone(),
             players::remove(self.target.clone(), reg_name(dst.clone()), count, None));
         self.emit(Complete(block));
+    }
+
+    fn emit_xset(
+        &mut self, conds: &Vec<Cond>, tgt: &Target, obj: &Objective, value: i32)
+    {
+        let block = make_cmd_block(
+            self.selector.clone(), conds.clone(),
+            players::set(tgt.clone(), obj.clone(), value, None));
+        self.emit(Complete(block));
+    }
+
+    fn emit_power_label(&mut self, conds: Vec<Cond>, label: String) {
+        let selector = self.selector.clone();
+        self.emit(Pending(label, Box::new(move |extent| {
+            match extent {
+                Extent::Empty => {
+                    panic!("oh no!");
+                }
+                Extent::MinMax(min, max) => {
+                    make_cmd_block(
+                        selector, conds,
+                        Fill(
+                            min.as_abs(), max.as_abs(),
+                            "minecraft:redstone_block".to_string(),
+                            None, None, None))
+                }
+            }
+        })));
+    }
+
+    // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
+    // a local extension trait.
+    fn mem_target(&self, region: &MemoryRegion) -> Target {
+        Target::Name(format!("mem_{}_{}", region.start, region.size))
+    }
+
+    // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
+    // a local extension trait.
+    fn mem_label(&self, region: &MemoryRegion) -> String {
+        format!("mem_{}_{}", region.start, region.size)
+    }
+
+    // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
+    // a local extension trait.
+    fn mem_conds(
+        &self, conds: &Vec<Cond>, region: &MemoryRegion, addr: &Register)
+        -> Vec<Cond>
+    {
+        let mut c = conds.clone();
+        let end = region.start + region.size;
+        // FIXME: Either handle addresses up to 4Gib (probably not needed)
+        // or emit an error/warning some better way than panicking.
+        if end > i32::MAX as u32 {
+            panic!("Memory addresses greater than 2Gib are not supported.");
+        }
+        c.push(Cond::bounded(addr.clone(), region.start as i32, end as i32));
+        c
+    }
+
+    fn emit_mem_tag(&mut self, conds: &Vec<Cond>, addr: &Register, id: u32) {
+        // FIXME: Awkward cloning.
+        let obj_mem_tag = self.obj_mem_tag.clone();
+
+        for region in self.computer.memory.iter() {
+            let region_conds = self.mem_conds(&conds, &region, &addr);
+            let tgt = self.mem_target(region);
+            self.emit_xset(&region_conds, &tgt, &obj_mem_tag, id as i32);
+        }
+    }
+
+    fn emit_power_mem(&mut self, conds: &Vec<Cond>, addr: &Register) {
+        for region in self.computer.memory.iter() {
+            let region_conds = self.mem_conds(&conds, &region, &addr);
+            let label = self.mem_label(region);
+            self.emit_power_label(region_conds.clone(), label);
+        }
+    }
+
+    fn mem_tagged(&self, id: u32) -> Target {
+        let tag_obj = self.obj_mem_tag.clone();
+        Target::Sel(Selector {
+            scores: {
+                let mut s = HashMap::new();
+                s.insert(tag_obj, Interval::Bounded(id as i32, id as i32));
+                s },
+            ..Selector::entity() })
+    }
+
+    fn emit_ldr_rr(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
+        let ldr_id = self.gen_unique_int();
+        self.emit_mem_tag(&conds, &src, ldr_id);
+        let tagged = self.mem_tagged(ldr_id);
+
+        // mov tagged, MemOp, 0
+        // FIXME: Needing to clone self.obj_mem_op is pretty clunky.  But the
+        // Assembler object will need to be internally decomposed to get rid of
+        // the awkwardness.  This can come as part of a larger reorg.
+        let obj_mem_op = self.obj_mem_op.clone();
+        self.emit_xset(&conds, &tagged, &obj_mem_op, 0);
+
+        // mov tagged, MemAddr, src
+        // FIXME: Pass t0 for the success register to ignore the success count.
+        // It would be nice to eventually handle the aux outs more generically.
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        // FIXME: Awkward cloning.
+        let obj_mem_addr = self.obj_mem_addr.clone();
+        self.emit_xr(&conds, &tagged, &obj_mem_addr, PlayerOp::Asn, &src, &t0);
+
+        self.emit_power_mem(&conds, &src);
+
+        // REVIEW: It would be nice to coalesce terminals here.  ldr just needs
+        // a one tick delay to allow the memory controller time to produce the
+        // value.
+        let cont_label = self.gen_unique_label("ldr_cont_");
+        self.emit_power_label(conds.clone(), cont_label.clone());
+        self.emit(Terminal);
+        self.emit(Label(cont_label));
+
+        // mov dst, tagged, MemData
+        // FIXME: Awkward cloning.
+        let obj_mem_data = self.obj_mem_data.clone();
+        self.emit_rx(&conds, &dst, PlayerOp::Asn, &tagged, &obj_mem_data);
+    }
+
+    fn emit_str_rr(&mut self, conds: Vec<Cond>, src: Register, dst: Register) {
+        let str_id = self.gen_unique_int();
+        self.emit_mem_tag(&conds, &src, str_id);
+        let tagged = self.mem_tagged(str_id);
+
+        // mov tagged, MemOp, 1
+        // FIXME: Awkward cloning.
+        let obj_mem_op = self.obj_mem_op.clone();
+        self.emit_xset(&conds, &tagged, &obj_mem_op, 1);
+
+        // mov tagged, MemAddr, dst
+        // FIXME: Pass t0 for the success register to ignore the success count.
+        // It would be nice to eventually handle the aux outs more generically.
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        // FIXME: Awkward cloning.
+        let obj_mem_addr = self.obj_mem_addr.clone();
+        self.emit_xr(&conds, &tagged, &obj_mem_addr, PlayerOp::Asn, &dst, &t0);
+
+        // mov tagged, MemData, src
+        // FIXME: Pass t0 for the success register to ignore the success count.
+        // It would be nice to eventually handle the aux outs more generically.
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        // FIXME: Awkward cloning.
+        let obj_mem_data = self.obj_mem_data.clone();
+        self.emit_xr(&conds, &tagged, &obj_mem_data, PlayerOp::Asn, &src, &t0);
+
+        // REVIEW: It would be nice to coalesce terminals here.  str just needs
+        // a one tick delay to allow the memory controller time to produce the
+        // value.
+        let cont_label = self.gen_unique_label("str_cont_");
+        self.emit_power_label(conds.clone(), cont_label.clone());
+        self.emit(Terminal);
+        self.emit(Label(cont_label));
     }
 
     fn emit_and_rr(&mut self, conds: &Vec<Cond>, dst: &Register, src: &Register) {
@@ -460,50 +636,17 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 
     fn emit_br_l(&mut self, conds: Vec<Cond>, label: String) {
-        // FIXME: formalize unique label generation.
-        let cont_label = format!("{}_cont_{}", label, self.unique);
-        self.unique += 1;
-
         let t0 = Register::Spec(self.obj_tmp0.clone());
         self.emit_rset(&vec!(), &t0, 0);
         self.emit_rset(&conds, &t0, 1);
 
-        let selector = self.selector.clone();
-        let t0_copy = t0.clone();
-        self.emit(Pending(label, Box::new(move |extent| {
-            match extent {
-                Extent::Empty => {
-                    panic!("oh no!");
-                }
-                Extent::MinMax(min, max) => {
-                    make_cmd_block(
-                        selector, vec!(Cond::eq(t0_copy, 1)),
-                        Fill(
-                            min.as_abs(), max.as_abs(),
-                            "minecraft:redstone_block".to_string(),
-                            None, None, None))
-                }
-            }
-        })));
+        let true_conds = vec!(Cond::eq(t0.clone(), 1));
+        let false_conds = vec!(Cond::eq(t0, 0));
 
-        let selector = self.selector.clone();
-        let t0_copy = t0.clone();
-        self.emit(Pending(cont_label.clone(), Box::new(move |extent| {
-            match extent {
-                Extent::Empty => {
-                    panic!("oh no!");
-                }
-                Extent::MinMax(min, max) => {
-                    make_cmd_block(
-                        selector, vec!(Cond::eq(t0_copy, 0)),
-                        Fill(
-                            min.as_abs(), max.as_abs(),
-                            "minecraft:redstone_block".to_string(),
-                            None, None, None))
-                }
-            }
-        })));
+        let cont_label = self.gen_unique_label("br_cont_");
 
+        self.emit_power_label(true_conds, label);
+        self.emit_power_label(false_conds, cont_label.clone());
         self.emit(Terminal);
         self.emit(Label(cont_label));
     }
