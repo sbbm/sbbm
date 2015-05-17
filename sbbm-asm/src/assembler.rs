@@ -3,8 +3,9 @@ use ast::Op::*;
 use ast::Statement::*;
 use commands::{
     Command, Objective, PlayerOp, Selector, SelectorName, SelectorTeam, Target,
-    Team, players, self};
+    Team, players};
 use commands::Command::*;
+use fab;
 use hw::{Computer, MemoryRegion};
 use std::boxed::FnBox;
 use nbt::*;
@@ -19,6 +20,8 @@ use self::AssembledItem::*;
 
 pub type PendingFn = Box<FnBox(Extent) -> Block>;
 
+// REVIEW: AssembledItem is now used by fab, so maybe it should be renamed and
+// put somewhere more general.  Seems like fab should not be use'ing assembler.
 pub enum AssembledItem {
     Label(String),
     Complete(Block),
@@ -44,8 +47,7 @@ pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
     buffer: VecDeque<AssembledItem>,
     target: Target,
     selector: Selector,
-    // TODO: Add uses_memory.
-    //uses_memory: bool,
+    uses_memory: bool,
     uses_bitwise: bool,
     done: bool,
     unique: u32,
@@ -81,8 +83,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             buffer: VecDeque::new(),
             target: target,
             selector: selector,
-            // TODO: Add uses_memory.
-            //uses_memory: false,
+            uses_memory: false,
             uses_bitwise: false,
             done: false,
             unique: 0,
@@ -107,6 +108,10 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             obj_mem_data: "MemData".to_string(),
             obj_mem_tag: "MemTag".to_string(),
         }
+    }
+
+    pub fn uses_memory(&self) -> bool {
+        self.uses_memory
     }
 
     fn assemble(&mut self, stmt: Statement) {
@@ -309,12 +314,6 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
 
     // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
     // a local extension trait.
-    fn mem_label(&self, region: &MemoryRegion) -> String {
-        format!("mem_{}_{}", region.start, region.size)
-    }
-
-    // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
-    // a local extension trait.
     fn mem_conds(
         &self, conds: &Vec<Cond>, region: &MemoryRegion, addr: &Register)
         -> Vec<Cond>
@@ -344,7 +343,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     fn emit_power_mem(&mut self, conds: &Vec<Cond>, addr: &Register) {
         for region in self.computer.memory.iter() {
             let region_conds = self.mem_conds(&conds, &region, &addr);
-            let label = self.mem_label(region);
+            let label = fab::mem_label(region);
             self.emit_power_label(region_conds.clone(), label);
         }
     }
@@ -360,6 +359,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 
     fn emit_ldr_rr(&mut self, conds: Vec<Cond>, dst: Register, src: Register) {
+        self.uses_memory = true;
+
         let ldr_id = self.gen_unique_int();
         self.emit_mem_tag(&conds, &src, ldr_id);
         let tagged = self.mem_tagged(ldr_id);
@@ -396,6 +397,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 
     fn emit_str_rr(&mut self, conds: Vec<Cond>, src: Register, dst: Register) {
+        self.uses_memory = true;
+
         let str_id = self.gen_unique_int();
         self.emit_mem_tag(&conds, &src, str_id);
         let tagged = self.mem_tagged(str_id);
@@ -967,16 +970,8 @@ fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {
             Target::Sel(sel), types::REL_ZERO, Box::new(final_cmd));
     }
 
-    let mut nbt = NbtCompound::new();
-    let cmd_str = commands::escape(&final_cmd.to_string()[..]);
-    nbt.insert("Command".to_string(), Nbt::String(cmd_str));
     // FIXME: Add a flag to control whether TrackOutput is on or off by default.
-    nbt.insert("TrackOutput".to_string(), Nbt::Byte(1));
-    Block {
-        id: "minecraft:command_block".to_string(),
-        data: 0,
-        nbt: nbt,
-    }
+    fab::cmd_block(final_cmd, true)
 }
 
 fn reg_name(reg: Register) -> String {
@@ -1011,7 +1006,7 @@ impl<'c, S : Iterator<Item=Statement>> Iterator for Assembler<'c, S> {
                 self.assemble(stmt);
             } else {
                 self.done = true;
-                return None
+                return Some(Terminal)
             }
         }
         self.buffer.pop_front()

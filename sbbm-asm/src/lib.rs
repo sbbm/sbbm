@@ -7,6 +7,7 @@ extern crate regex;
 pub mod assembler;
 pub mod ast;
 pub mod commands;
+pub mod fab;
 pub mod hw;
 pub mod types;
 pub mod layout;

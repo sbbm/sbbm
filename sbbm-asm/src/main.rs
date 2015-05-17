@@ -2,20 +2,17 @@ extern crate docopt;
 extern crate rustc_serialize;
 extern crate sbbm_asm;
 
-use sbbm_asm::assembler::{Assembler, AssembledItem};
-use sbbm_asm::commands::{
-    self, Command, Selector, SelectorName, SelectorTeam, Target,
-    objectives, players, teams};
-use sbbm_asm::hw::{Computer, MemoryRegion, MemoryStride};
 use docopt::Docopt;
+use sbbm_asm::assembler::{Assembler, AssembledItem};
+use sbbm_asm::commands::{self, Command};
+use sbbm_asm::fab;
+use sbbm_asm::hw::{Computer, MemoryRegion, MemoryStride};
 use sbbm_asm::layout::{Layout, LayoutMotion, LinearMotion, PackedMotion};
 use sbbm_asm::lexer::Lexer;
-use sbbm_asm::nbt::{Nbt, NbtCompound};
+use sbbm_asm::nbt::Nbt;
 use sbbm_asm::parser::Parser;
-use sbbm_asm::types::{Extent, Pos3, Vec3};
+use sbbm_asm::types::{Extent, Vec3};
 
-use std::i32;
-use std::ops::DerefMut;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -73,14 +70,16 @@ fn main() {
     if let Ok(_) = file.read_to_string(&mut input) {
         let origin = Vec3::new(args.arg_x, args.arg_y, args.arg_z);
         let computer = Computer {
-            memory: vec!(
+            name: "computer".to_string(),
+            origin: origin,
+            memory: vec![
                 MemoryRegion {
                     start: 0x10,
                     size: 0x8000,
                     origin: Vec3::new(origin.x - 1, 0, origin.z),
                     growth: Vec3::new(-1, 1, 1),
                     stride: MemoryStride::XY(32, 256)
-                })
+                }]
         };
 
         let mut parser = Parser::new(Lexer::new(&input[..], &args.arg_source[..]));
@@ -92,207 +91,53 @@ fn main() {
             Some(LayoutKind::Linear) => Box::new(LinearMotion::new(origin)),
             Some(LayoutKind::Packed) | None => Box::new(PackedMotion::new(origin)),
         };
-        let mut layout = Layout::new(motion, assembler);
+        let mem_controllers = {
+            let mut c = vec!();
+            for region in computer.memory.iter() {
+                c.extend(fab::make_mem_ctrl(region));
+            }
+            c };
+        let mut layout = Layout::new(motion, assembler.chain(mem_controllers));
 
         let mut extent = Extent::Empty;
         for (pos, block) in &mut layout {
             extent.add(pos);
-            output.write_cmd(&Command::SetBlock(
+            write!(output, "{}\n", Command::SetBlock(
                 pos.as_abs(), block.id, None, None,
                 Some(Nbt::Compound(block.nbt)))).unwrap();
         }
 
-        if args.flag_init.is_some() || args.flag_destroy.is_some() {
-            let mut init = optional_out(args.flag_init);
-            let mut destroy = optional_out(args.flag_destroy);
-            write_init_destroy(
-                init.deref_mut(), destroy.deref_mut(),
-                &computer, origin, extent).unwrap();
+        if let Some(init) = args.flag_init {
+            let mut f = File::create(Path::new(&init[..])).unwrap();
+            computer.write_init_script(&mut f).unwrap();
+        }
+
+        if let Some(destroy) = args.flag_destroy {
+            let mut f = File::create(Path::new(&destroy[..])).unwrap();
+            computer.write_destroy_script(&mut f).unwrap();
+            for cmd in commands::safe_fill(
+                extent, "minecraft:air".to_string(), None, None, None)
+            {
+                write!(f, "{}\n", cmd);
+            }
         }
 
         if let Some(boot) = args.flag_boot {
             let mut f = File::create(Path::new(&boot[..])).unwrap();
-            boot_computer(&mut f, &layout);
+            boot_computer(&mut f, &layout).unwrap()
         }
     }
 
 }
 
-fn optional_out(path: Option<String>) -> Box<CommandWrite> {
-    if let Some(path) = path {
-        Box::new(File::create(Path::new(&path[..])).unwrap())
-    } else {
-        Box::new(io::sink())
-    }
-}
-
-trait CommandWrite {
-    fn write_cmd(&mut self, cmd: &Command) -> io::Result<()>;
-}
-
-impl<W : Write> CommandWrite for W {
-    fn write_cmd(&mut self, cmd: &Command) -> io::Result<()> {
-        write!(self, "{}\n", cmd)
-    }
-}
-
-fn write_init_destroy(
-    init: &mut CommandWrite, destroy: &mut CommandWrite,
-    computer: &Computer, origin: Vec3, extent: Extent) -> io::Result<()>
-{
-    let comp_tgt = Target::Sel(Selector {
-        name: Some(SelectorName::Is("computer".to_string())),
-        ..Selector::entity()
-    });
-
-    let pos = origin.as_abs();
-    let mut data_tag = NbtCompound::new();
-    data_tag.insert("CustomName".to_string(), Nbt::String("computer".to_string()));
-    data_tag.insert("NoGravity".to_string(), Nbt::Byte(1));
-    try!(init.write_cmd(&Command::Summon(
-        "ArmorStand".to_string(), Some(pos),
-        Some(Nbt::Compound(data_tag)))));
-    try!(destroy.write_cmd(&Command::Kill(comp_tgt.clone())));
-
-    try!(init_destroy_regs(init, destroy, comp_tgt.clone()));
-    try!(init_destroy_bitwise(init, destroy, origin));
-    try!(init_destroy_memory(init, destroy, computer));
-
-    if let Extent::MinMax(min, max) = extent {
-        let cmd = Command::Fill(
-            min.as_abs(), max.as_abs(),
-            "minecraft:air".to_string(), None, None, None);
-        destroy.write_cmd(&cmd).unwrap();
-    }
-
-    Ok(())
-}
-
-fn init_destroy_regs(
-    init: &mut CommandWrite, destroy: &mut CommandWrite, comp_tgt: Target)
-    -> io::Result<()>
-{
-    // General registers
-    for i in (0..32) {
-        let obj = format!("r{}", i);
-
-        try!(init.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(init.write_cmd(&players::set(comp_tgt.clone(), obj.clone(), 0, None)));
-
-        try!(destroy.write_cmd(&objectives::remove(obj)));
-    }
-
-    // Predicate registers
-    for i in (0..8) {
-        let obj = format!("p{}", i);
-
-        try!(init.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(init.write_cmd(&players::set(comp_tgt.clone(), obj.clone(), 0, None)));
-
-        try!(destroy.write_cmd(&objectives::remove(obj)));
-    }
-
-    // Temp registers (implementation details)
-    for i in (0..4) {
-        let obj = format!("t{}", i);
-
-        try!(init.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(init.write_cmd(&players::set(comp_tgt.clone(), obj.clone(), 0, None)));
-
-        try!(destroy.write_cmd(&objectives::remove(obj)));
-    }
-
-    let special_regs = [
-        ("ZERO", 0),
-        ("TWO", 2),
-        ("MIN", i32::MIN)];
-
-    // Special registers (implementation details)
-    for &(name, value) in special_regs.iter() {
-        let obj = name.to_string();
-        try!(init.write_cmd(&objectives::add(obj.clone(), "dummy".to_string(), None)));
-        try!(init.write_cmd(&players::set(comp_tgt.clone(), obj.clone(), value, None)));
-
-        try!(destroy.write_cmd(&objectives::remove(obj)));
-    }
-
-    Ok(())
-}
-
-fn init_destroy_bitwise(
-    init: &mut CommandWrite, destroy: &mut CommandWrite, origin: Vec3)
-    -> io::Result<()>
-{
-    for obj in ["BitComponent", "BitNumber"].iter() {
-        try!(init.write_cmd(&objectives::add(obj.to_string(), "dummy".to_string(), None)));
-
-        try!(destroy.write_cmd(&objectives::remove(obj.to_string())));
-    }
-
-    let bit_team = "Shifters".to_string();
-
-    // Bitwise entities
-    let mut shifters = vec!();
-    for i in (0..32) {
-        let name = format!("bit_{}", i);
-        let target = Target::Sel(Selector {
-            name: Some(SelectorName::Is(name.clone())),
-            ..Selector::entity()
-        });
-        shifters.push(target.clone());
-
-        let pos = Pos3::abs(origin.x, origin.y, origin.z + i);
-        let mut data_tag = NbtCompound::new();
-        data_tag.insert("CustomName".to_string(), Nbt::String(name));
-        data_tag.insert("NoGravity".to_string(), Nbt::Byte(1));
-        try!(init.write_cmd(&Command::Summon(
-            "ArmorStand".to_string(), Some(pos),
-            Some(Nbt::Compound(data_tag)))));
-
-        try!(init.write_cmd(&players::set(target.clone(), "BitNumber".to_string(), i, None)));
-        try!(init.write_cmd(&players::set(target, "BitComponent".to_string(), 1 << i, None)));
-    }
-
-    try!(init.write_cmd(&teams::add(bit_team.clone(), None)));
-    try!(init.write_cmd(&teams::join(bit_team.clone(), shifters)));
-
-    let bit_team_target = Target::Sel(Selector {
-        team: Some(SelectorTeam::On(bit_team.clone())),
-        ..Selector::entity()
-    });
-    try!(destroy.write_cmd(&Command::Kill(bit_team_target)));
-    try!(destroy.write_cmd(&teams::remove(bit_team)));
-
-    Ok(())
-}
-
-fn init_destroy_memory(
-    init: &mut CommandWrite, destroy: &mut CommandWrite, computer: &Computer)
-    -> io::Result<()>
-{
-    for region in computer.memory.iter() {
-        let extent = region.extent();
-
-        let clay = "minecraft:stained_hardened_clay".to_string();
-        for cmd in commands::safe_fill(extent, clay, None, None, None) {
-            try!(init.write_cmd(&cmd));
-        }
-
-        let air = "minecraft:air".to_string();
-        for cmd in commands::safe_fill(extent, air, None, None, None) {
-            try!(destroy.write_cmd(&cmd));
-        }
-    }
-    Ok(())
-}
-
-fn boot_computer<Source>(w: &mut CommandWrite, layout: &Layout<Source>)
+fn boot_computer<Source>(w: &mut Write, layout: &Layout<Source>) -> io::Result<()>
     where Source : Iterator<Item=AssembledItem>
 {
     if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
         let cmd = Command::Fill(
             min.as_abs(), max.as_abs(),
             "minecraft:redstone_block".to_string(), None, None, None);
-        w.write_cmd(&cmd).unwrap();
+        try!(write!(w, "{}\n", cmd));
     }
+    Ok(())
 }

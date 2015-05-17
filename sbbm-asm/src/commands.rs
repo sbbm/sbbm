@@ -27,6 +27,32 @@ impl fmt::Display for Target {
     }
 }
 
+pub trait ToTarget {
+    fn to_target(&self) -> Target;
+}
+
+impl ToTarget for String {
+    fn to_target(&self) -> Target {
+        Target::Name(self.clone())
+    }
+}
+
+impl<'s> ToTarget for &'s str {
+    fn to_target(&self) -> Target {
+        Target::Name(self.to_string())
+    }
+}
+
+pub trait IntoTarget {
+    fn into_target(self) -> Target;
+}
+
+impl IntoTarget for String {
+    fn into_target(self) -> Target {
+        Target::Name(self)
+    }
+}
+
 // REVIEW: Consider a separate module for Selector.  It is substantial.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Selector {
@@ -60,6 +86,18 @@ impl Selector {
 
     pub fn entity() -> Selector {
         Selector { kind: SelectorKind::Entity, ..Default::default() }
+    }
+}
+
+impl ToTarget for Selector {
+    fn to_target(&self) -> Target {
+        Target::Sel(self.clone())
+    }
+}
+
+impl IntoTarget for Selector {
+    fn into_target(self) -> Target {
+        Target::Sel(self)
     }
 }
 

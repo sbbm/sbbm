@@ -23,7 +23,7 @@ impl LinearMotion {
     pub fn new(start: Vec3) -> LinearMotion {
         LinearMotion {
             start: start,
-            pos: start,
+            pos: Vec3::new(start.x, start.y + 1, start.z),
         }
     }
 }
