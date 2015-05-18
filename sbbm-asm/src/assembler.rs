@@ -161,6 +161,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             BrL(label) => self.emit_br_l(conds, label),
             BrR(reg) => self.emit_br_r(conds, reg),
             BrLnkL(label) => self.emit_br_lnk_l(conds, label),
+            BrLnkR(reg) => self.emit_br_lnk_r(conds, reg),
             RawCmd(outs, cmd) => {
                 let mut block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
                 self.add_command_stats(
@@ -688,6 +689,11 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         self.emit_br_label(conds, label, true);
     }
 
+    fn emit_br_lnk_r(&mut self, conds: Vec<Cond>, reg: Register) {
+        self.emit_br_reg(conds, reg, true);
+    }
+
+    // REVIEW: Can emit_br_label and emit_br_reg share more code?
     fn emit_br_label(&mut self, conds: Vec<Cond>, label: String, link: bool) {
         let t0 = Register::Spec(self.obj_tmp0.clone());
         self.emit_rset(&vec!(), &t0, 0);
