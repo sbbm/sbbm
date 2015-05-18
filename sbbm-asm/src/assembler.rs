@@ -52,6 +52,8 @@ pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
     done: bool,
     unique: u32,
     pending_labels: Vec<String>,
+    label_addrs: Vec<(i32, String)>,
+    label_addr_map: HashMap<String, i32>,
     team_bit: Team,
     tgt_bit_all: Target,
     tgt_bit_one: Target,
@@ -88,6 +90,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             done: false,
             unique: 0,
             pending_labels: vec!(),
+            label_addrs: vec![],
+            label_addr_map: HashMap::new(),
             team_bit: team_bit.to_string(),
             tgt_bit_all: Target::Sel(Selector {
                 team: Some(SelectorTeam::On(team_bit.to_string())),
@@ -156,6 +160,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             Urng(dst, tst, min, max) => self.emit_urng(conds, dst, tst, min, max),
             BrL(label) => self.emit_br_l(conds, label),
             BrR(reg) => self.emit_br_r(conds, reg),
+            BrLnkL(label) => self.emit_br_lnk_l(conds, label),
             RawCmd(outs, cmd) => {
                 let mut block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
                 self.add_command_stats(
@@ -163,6 +168,41 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                 self.emit(Complete(block));
             }
             _ => panic!("not implemented: {:?}", op)
+        }
+    }
+
+    fn get_label_addr(&mut self, label: &str) -> i32 {
+        match self.label_addr_map.get(label) {
+            Some(addr) => *addr,
+            None => {
+                // Skip zero as an address.
+                let addr = (self.label_addrs.len() + 1) as i32;
+                self.label_addrs.push((addr, label.to_string()));
+                addr
+            }
+        }
+    }
+
+    fn coalesce_label_addrs(&mut self, labels: &Vec<String>) {
+        if labels.is_empty() {
+            return;
+        }
+
+        let mut existing = None;
+        for label in labels {
+            if let Some(addr) = self.label_addr_map.get(label) {
+                existing = Some(*addr);
+                break;
+            }
+        }
+
+        let existing = existing.unwrap_or_else(
+            || self.get_label_addr(&labels[0][..]));
+
+        for label in labels {
+            if !self.label_addr_map.contains_key(label) {
+                self.label_addr_map.insert(label.clone(), existing);
+            }
         }
     }
 
@@ -179,8 +219,9 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                     let first_label = self.pending_labels[0].clone();
 
                     // FIXME: Use drain when it is no longer unstable.
-                    let mut labels = vec!();
+                    let mut labels = vec![];
                     mem::swap(&mut labels, &mut self.pending_labels);
+                    self.coalesce_label_addrs(&labels);
                     for label in labels.into_iter() {
                         self.buffer.push_back(Label(label));
                     }
@@ -636,6 +677,18 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 
     fn emit_br_l(&mut self, conds: Vec<Cond>, label: String) {
+        self.emit_br_label(conds, label, false);
+    }
+
+    fn emit_br_r(&mut self, conds: Vec<Cond>, reg: Register) {
+        self.emit_br_reg(conds, reg, false);
+    }
+
+    fn emit_br_lnk_l(&mut self, conds: Vec<Cond>, label: String) {
+        self.emit_br_label(conds, label, true);
+    }
+
+    fn emit_br_label(&mut self, conds: Vec<Cond>, label: String, link: bool) {
         let t0 = Register::Spec(self.obj_tmp0.clone());
         self.emit_rset(&vec!(), &t0, 0);
         self.emit_rset(&conds, &t0, 1);
@@ -644,6 +697,9 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let false_conds = vec!(Cond::eq(t0, 0));
 
         let cont_label = self.gen_unique_label("br_cont_");
+        if link {
+            self.emit_branch_link(&true_conds, &cont_label);
+        }
 
         self.emit_power_label(true_conds, label);
         self.emit_power_label(false_conds, cont_label.clone());
@@ -651,12 +707,33 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         self.emit(Label(cont_label));
     }
 
-    fn emit_br_r(&mut self, conds: Vec<Cond>, reg: Register) {
-        let block = make_cmd_block(
-            self.selector.clone(), conds,
-            Say(format!("FIXME: emit BrR to {}", reg_name(reg))));
-        self.emit(Complete(block));
+    fn emit_br_reg(&mut self, conds: Vec<Cond>, reg: Register, link: bool) {
+        let t0 = Register::Spec(self.obj_tmp0.clone());
+        self.emit_rset(&vec!(), &t0, 0);
+        self.emit_rset(&conds, &t0, 1);
+
+        let true_conds = vec!(Cond::eq(t0.clone(), 1));
+        let false_conds = vec!(Cond::eq(t0, 0));
+
+        let cont_label = self.gen_unique_label("br_cont_");
+        if link {
+            self.emit_branch_link(&true_conds, &cont_label);
+        }
+
+        // mov IndAddr, reg
+        let ind_addr_reg = Register::Spec("IndAddr".to_string());
+        self.emit_rr(&true_conds, &ind_addr_reg, PlayerOp::Asn, &reg);
+
+        self.emit_power_label(true_conds, "@jump_indirect".to_string());
+        self.emit_power_label(false_conds, cont_label.clone());
         self.emit(Terminal);
+        self.emit(Label(cont_label));
+    }
+
+    fn emit_branch_link(&mut self, conds: &Vec<Cond>, label: &String) {
+        let lr = Register::Spec("lr".to_string());
+        let addr = self.get_label_addr(&label[..]);
+        self.emit_rset(&conds, &lr, addr);
     }
 
     fn expand_bits(&mut self, conds: Vec<Cond>, reg: Register, bit_obj: Objective) {
@@ -927,6 +1004,20 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         self.emit_rr(&neg_pos_conds, &dst, PlayerOp::Sub, &src);
     }
 
+    fn emit_indirect_jump_table(&mut self) {
+        self.emit(Label("@jump_indirect".to_string()));
+
+        let ind_addr_reg = Register::Spec("IndAddr".to_string());
+        let mut label_addrs = vec![];
+        mem::swap(&mut label_addrs, &mut self.label_addrs);
+        for (addr, label) in label_addrs.into_iter() {
+            let conds = vec![Cond::eq(ind_addr_reg.clone(), addr)];
+            self.emit_power_label(conds, label);
+        }
+
+        self.emit(Terminal);
+    }
+
     fn add_success_count(&self, block: &mut Block, reg: Register) {
         let outs = vec!((CommandBlockOut::SuccessCount, reg));
         self.add_command_stats(
@@ -975,16 +1066,15 @@ impl<'c, S : Iterator<Item=Statement>> Iterator for Assembler<'c, S> {
     type Item = AssembledItem;
 
     fn next(&mut self) -> Option<AssembledItem> {
-        if self.done {
-            return None;
-        }
-
         while self.buffer.is_empty() {
             if let Some(stmt) = self.input.next() {
                 self.assemble(stmt);
-            } else {
+            } else if !self.done {
+                self.emit(Terminal);
+                self.emit_indirect_jump_table();
                 self.done = true;
-                return Some(Terminal)
+            } else {
+                break;
             }
         }
         self.buffer.pop_front()

@@ -177,6 +177,10 @@ impl RegsInitDestroy {
         regs.push(("TWO".to_string(), 2));
         regs.push(("MIN".to_string(), i32::MIN));
 
+        regs.push(("IndAddr".to_string(), 0));
+        regs.push(("lr".to_string(), 0));
+        regs.push(("sp".to_string(), 0));
+
         regs
     }
 }

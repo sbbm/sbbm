@@ -311,3 +311,25 @@ ldr r1, [r1]", value, addr)[..]);
         }
     }
 }
+
+#[test]
+fn test_br_r() {
+    let server = Server::new();
+    server.run_asm("
+foo:
+; prove the ordering
+mov r1, #0
+
+mov r0, #1234
+b lr
+
+main:
+; prove the ordering
+mov r0, #0
+
+bl =foo
+mov r1, #5678");
+
+    assert_eq!(1234, server.get_computer("r0").unwrap());
+    assert_eq!(5678, server.get_computer("r1").unwrap());
+}
