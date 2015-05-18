@@ -290,13 +290,13 @@ urng r0, r0, #{}, #{}", input, min, max)[..]);
     }
 }
 
-//#[test]
+#[test]
 #[allow(overflowing_literals)]
 fn test_ldr_str() {
     let server = Server::new();
 
-    let values = [0xfedcba90, 0x12345678, 1, -1];
-    let addrs = [0x10];
+    let values = [1, -1, 0xfedcba97, 0xedbca987, 0x12345678, 0];
+    let addrs = [0x10, 0x14, 0x18, 0x10c];
 
     for addr in addrs.iter() {
         for value in values.iter() {
@@ -310,6 +310,4 @@ ldr r1, [r1]", value, addr)[..]);
             assert_eq!(*value, server.get_computer("r1").unwrap());
         }
     }
-
-    assert!(false);
 }

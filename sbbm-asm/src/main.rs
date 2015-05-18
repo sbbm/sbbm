@@ -118,7 +118,7 @@ fn main() {
             for cmd in commands::safe_fill(
                 extent, "minecraft:air".to_string(), None, None, None)
             {
-                write!(f, "{}\n", cmd);
+                write!(f, "{}\n", cmd).unwrap();
             }
         }
 

@@ -2,8 +2,8 @@ use ast::{CommandBlockOut, Cond, Op, Register, Statement};
 use ast::Op::*;
 use ast::Statement::*;
 use commands::{
-    Command, Objective, PlayerOp, Selector, SelectorName, SelectorTeam, Target,
-    Team, players};
+    Command, IntoTarget, Objective, PlayerOp, Selector, SelectorName,
+    SelectorTeam, Target, Team, players};
 use commands::Command::*;
 use fab;
 use hw::{Computer, MemoryRegion};
@@ -185,8 +185,9 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                         self.buffer.push_back(Label(label));
                     }
 
-                    let off_item = self.make_label_power_off_item(first_label);
-                    self.buffer.push_back(off_item);
+                    // FIXME: Add a flag to control whether TrackOutput is on or
+                    // off by default.
+                    self.buffer.push_back(fab::power_off(first_label, true));
                 }
 
                 self.buffer.push_back(item);
@@ -308,12 +309,6 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
 
     // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
     // a local extension trait.
-    fn mem_target(&self, region: &MemoryRegion) -> Target {
-        Target::Name(format!("mem_{}_{}", region.start, region.size))
-    }
-
-    // REVIEW: This can be a free function, or maybe attached to MemoryRegion as
-    // a local extension trait.
     fn mem_conds(
         &self, conds: &Vec<Cond>, region: &MemoryRegion, addr: &Register)
         -> Vec<Cond>
@@ -335,7 +330,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
 
         for region in self.computer.memory.iter() {
             let region_conds = self.mem_conds(&conds, &region, &addr);
-            let tgt = self.mem_target(region);
+            let tgt = fab::mem_selector(region).into_target();
             self.emit_xset(&region_conds, &tgt, &obj_mem_tag, id as i32);
         }
     }
@@ -400,7 +395,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         self.uses_memory = true;
 
         let str_id = self.gen_unique_int();
-        self.emit_mem_tag(&conds, &src, str_id);
+        self.emit_mem_tag(&conds, &dst, str_id);
         let tagged = self.mem_tagged(str_id);
 
         // mov tagged, MemOp, 1
@@ -423,6 +418,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         // FIXME: Awkward cloning.
         let obj_mem_data = self.obj_mem_data.clone();
         self.emit_xr(&conds, &tagged, &obj_mem_data, PlayerOp::Asn, &src, &t0);
+
+        self.emit_power_mem(&conds, &dst);
 
         // REVIEW: It would be nice to coalesce terminals here.  str just needs
         // a one tick delay to allow the memory controller time to produce the
@@ -940,38 +937,19 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         block.nbt.insert("CommandStats".to_string(), stats);
     }
-
-    fn make_label_power_off_item(&self, label: String) -> AssembledItem {
-        let selector = self.selector.clone();
-        Pending(label, Box::new(move |extent| {
-            match extent {
-                Extent::Empty => {
-                    panic!("oh no!");
-                }
-                Extent::MinMax(min, max) => {
-                    make_cmd_block(
-                        selector, vec!(),
-                        Fill(
-                            min.as_abs(), max.as_abs(),
-                            "minecraft:obsidian".to_string(),
-                            None, None, None))
-                }
-            }
-        }))
-    }
 }
 
 fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {
-    let mut final_cmd = cmd;
-    for cond in conds.into_iter() {
-        let mut sel = selector.clone();
-        sel.scores.insert(reg_name(cond.reg), cond.interval);
-        final_cmd = Command::Execute(
-            Target::Sel(sel), types::REL_ZERO, Box::new(final_cmd));
-    }
+    let cmd = if conds.is_empty() { cmd } else {
+        let mut sel = selector;
+        for cond in conds.into_iter() {
+            sel.scores.insert(reg_name(cond.reg), cond.interval);
+        }
 
+        Execute(sel.into_target(), types::REL_ZERO, Box::new(cmd))
+    };
     // FIXME: Add a flag to control whether TrackOutput is on or off by default.
-    fab::cmd_block(final_cmd, true)
+    fab::cmd_block(cmd, true)
 }
 
 fn reg_name(reg: Register) -> String {

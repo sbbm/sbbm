@@ -320,6 +320,7 @@ pub enum Command {
     SetBlock(Pos3, BlockId, Option<BlockData>, Option<SetBlockAction>, Option<Nbt>),
     Scoreboard(ScoreboardCmd),
     Summon(String, Option<Pos3>, Option<Nbt>),
+    Teleport(Option<Target>, Pos3),
     Raw(String),
 }
 
@@ -404,6 +405,15 @@ impl fmt::Display for Command {
                 let cmd_str = cmd.to_string();
                 write!(f, "execute {} {} {}", tgt, pos, escape(&cmd_str[..]))
             }
+            ExecuteDetect(
+                ref tgt, ref pos, ref block_pos, ref block_id, ref block_data,
+                ref cmd) =>
+            {
+                let cmd_str = cmd.to_string();
+                write!(f, "execute {} {} detect {} {} {} {}",
+                       tgt, pos, block_pos, block_id, block_data,
+                       escape(&cmd_str[..]))
+            }
             Fill(
                 ref min, ref max, ref block_id, ref block_data, ref action,
                 ref data_tag) =>
@@ -443,6 +453,13 @@ impl fmt::Display for Command {
                     try!(write!(f, " {}", data_tag));
                 }
                 Ok(())
+            }
+            Teleport(ref target, ref pos) => {
+                try!(f.write_str("tp"));
+                if let Some(ref target) = *target {
+                    try!(write!(f, " {}", target));
+                }
+                write!(f, " {}", pos)
             }
             Raw(ref raw) => write!(f, "{}", raw),
             _ => unimplemented!()
