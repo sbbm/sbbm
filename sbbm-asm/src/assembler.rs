@@ -320,10 +320,10 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         let mut c = conds.clone();
         let end = region.start + region.size;
-        // FIXME: Either handle addresses up to 4Gib (probably not needed)
+        // FIXME: Either handle addresses up to 4GiB (probably not needed)
         // or emit an error/warning some better way than panicking.
         if end > i32::MAX as u32 {
-            panic!("Memory addresses greater than 2Gib are not supported.");
+            panic!("Memory addresses greater than 2GiB are not supported.");
         }
         c.push(Cond::bounded(addr.clone(), region.start as i32, end as i32));
         c
