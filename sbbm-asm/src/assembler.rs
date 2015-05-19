@@ -44,6 +44,7 @@ impl fmt::Debug for AssembledItem {
 pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
     computer: &'c Computer,
     input: Source,
+    track_output: bool,
     buffer: VecDeque<AssembledItem>,
     target: Target,
     selector: Selector,
@@ -82,6 +83,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         Assembler {
             computer: computer,
             input: assembly,
+            track_output: false,
             buffer: VecDeque::new(),
             target: target,
             selector: selector,
@@ -112,6 +114,10 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             obj_mem_data: "MemData".to_string(),
             obj_mem_tag: "MemTag".to_string(),
         }
+    }
+
+    pub fn set_track_output(&mut self, value: bool) {
+        self.track_output = value;
     }
 
     pub fn uses_memory(&self) -> bool {
@@ -163,7 +169,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             BrLnkL(label) => self.emit_br_lnk_l(conds, label),
             BrLnkR(reg) => self.emit_br_lnk_r(conds, reg),
             RawCmd(outs, cmd) => {
-                let mut block = make_cmd_block(self.selector.clone(), conds, Raw(cmd));
+                let mut block = make_cmd_block(
+                    self.selector.clone(), conds, Raw(cmd), self.track_output);
                 self.add_command_stats(
                     &mut block, make_command_stats(self.target.clone(), outs));
                 self.emit(Complete(block));
@@ -227,9 +234,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                         self.buffer.push_back(Label(label));
                     }
 
-                    // FIXME: Add a flag to control whether TrackOutput is on or
-                    // off by default.
-                    self.buffer.push_back(fab::power_off(first_label, true));
+                    self.buffer.push_back(
+                        fab::power_off(first_label, self.track_output));
                 }
 
                 self.buffer.push_back(item);
@@ -275,7 +281,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            self.make_op_cmd_rr(dst.clone(), op, src.clone()));
+            self.make_op_cmd_rr(dst.clone(), op, src.clone()),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -285,7 +292,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         let mut block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            self.make_op_cmd_xr(tgt.clone(), obj.clone(), op, src.clone()));
+            self.make_op_cmd_xr(tgt.clone(), obj.clone(), op, src.clone()),
+            self.track_output);
         self.add_success_count(&mut block, success.clone());
         self.emit(Complete(block));
     }
@@ -296,28 +304,32 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            self.make_op_cmd_rx(dst.clone(), op, tgt.clone(), obj.clone()));
+            self.make_op_cmd_rx(dst.clone(), op, tgt.clone(), obj.clone()),
+            self.track_output);
         self.emit(Complete(block));
     }
 
     fn emit_rset(&mut self, conds: &Vec<Cond>, dst: &Register, value: i32) {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::set(self.target.clone(), reg_name(dst.clone()), value, None));
+            players::set(self.target.clone(), reg_name(dst.clone()), value, None),
+            self.track_output);
         self.emit(Complete(block));
     }
 
     fn emit_radd(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::add(self.target.clone(), reg_name(dst.clone()), count, None));
+            players::add(self.target.clone(), reg_name(dst.clone()), count, None),
+            self.track_output);
         self.emit(Complete(block));
     }
 
     fn emit_rsub(&mut self, conds: &Vec<Cond>, dst: &Register, count: i32) {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::remove(self.target.clone(), reg_name(dst.clone()), count, None));
+            players::remove(self.target.clone(), reg_name(dst.clone()), count, None),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -326,12 +338,14 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::set(tgt.clone(), obj.clone(), value, None));
+            players::set(tgt.clone(), obj.clone(), value, None),
+            self.track_output);
         self.emit(Complete(block));
     }
 
     fn emit_power_label(&mut self, conds: Vec<Cond>, label: String) {
         let selector = self.selector.clone();
+        let track_output = self.track_output;
         self.emit(Pending(label, Box::new(move |extent| {
             match extent {
                 Extent::Empty => {
@@ -343,7 +357,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                         Fill(
                             min.as_abs(), max.as_abs(),
                             "minecraft:redstone_block".to_string(),
-                            None, None, None))
+                            None, None, None),
+                        track_output)
                 }
             }
         })));
@@ -511,7 +526,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), players::rem_op(
                 self.tgt_bit_all.clone(), t0_obj.clone(),
-                self.target.clone(), self.obj_two.clone()));
+                self.target.clone(), self.obj_two.clone()),
+            self.track_output);
         self.emit(Complete(block));
         self.accum_bits(conds.clone(), dst.clone(), t0_obj);
     }
@@ -542,7 +558,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                 sign_bits_tgt, REL_ZERO,
                 Box::new(self.make_op_cmd_rx(
                     t0.clone(), PlayerOp::Add,
-                    self.tgt_bit_one.clone(), self.obj_bit_comp.clone()))));
+                    self.tgt_bit_one.clone(), self.obj_bit_comp.clone()))),
+            self.track_output);
         self.emit(Complete(block));
 
         // copy computer t0 to dst
@@ -572,7 +589,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let block = make_cmd_block(
             self.selector.clone(), lt_zero_conds, self.make_op_cmd_rx(
                 t0.clone(), PlayerOp::Add,
-                high_bit_tgt, self.obj_bit_comp.clone()));
+                high_bit_tgt, self.obj_bit_comp.clone()),
+            self.track_output);
         self.emit(Complete(block));
 
         // copy computer t0 to dst
@@ -600,7 +618,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             self.selector.clone(), conds.clone(), Execute(
                 active_bit_tgt, REL_ZERO,
                 Box::new(self.make_op_cmd_rr(
-                    dst.clone(), PlayerOp::Mul, two_reg))));
+                    dst.clone(), PlayerOp::Mul, two_reg))),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -755,7 +774,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
             self.make_op_cmd_xr(
-                tgt_all.clone(), bit_obj.clone(), PlayerOp::Asn, reg.clone()));
+                tgt_all.clone(), bit_obj.clone(), PlayerOp::Asn, reg.clone()),
+            self.track_output);
         self.emit(Complete(block));
 
         // If reg is negative, flip the sign of all temp values. This causes the
@@ -763,7 +783,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let min_reg = Register::Spec(self.obj_min.clone());
         let block = make_cmd_block(
             self.selector.clone(), lt_zero_conds.clone(), self.make_op_cmd_xr(
-                tgt_all.clone(), bit_obj.clone(), PlayerOp::Sub, min_reg));
+                tgt_all.clone(), bit_obj.clone(), PlayerOp::Sub, min_reg),
+            self.track_output);
         self.emit(Complete(block));
 
         // Divide all bit entities' bit_obj by their bit component.
@@ -777,7 +798,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         let block = make_cmd_block(
             self.selector.clone(), conds, players::rem_op(
                 tgt_all, bit_obj.clone(),
-                self.target.clone(), self.obj_two.clone()));
+                self.target.clone(), self.obj_two.clone()),
+            self.track_output);
         self.emit(Complete(block));
 
         // If reg is negative, set the high bit to one.
@@ -791,7 +813,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         });
         let block = make_cmd_block(
             self.selector.clone(), lt_zero_conds.clone(),
-            players::set(tgt_high, bit_obj, 1, None));
+            players::set(tgt_high, bit_obj, 1, None),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -810,7 +833,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             self.selector.clone(), conds, Execute(
                 self.tgt_bit_all.clone(), REL_ZERO,
                 Box::new(self.make_op_cmd_rx(
-                    dst, PlayerOp::Add, self.tgt_bit_one.clone(), bit_obj))));
+                    dst, PlayerOp::Add, self.tgt_bit_one.clone(), bit_obj))),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -823,7 +847,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
                 self.tgt_bit_all.clone(), REL_ZERO,
                 Box::new(players::op(
                     self.tgt_bit_one.clone(), lhs, op,
-                    self.tgt_bit_one.clone(), rhs))));
+                    self.tgt_bit_one.clone(), rhs))),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -837,14 +862,16 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         // Vector-scalar remove 32 from bitwise entities' tmp0
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(),
-            players::remove(self.tgt_bit_all.clone(), tmp0.clone(), 32, None));
+            players::remove(self.tgt_bit_all.clone(), tmp0.clone(), 32, None),
+            self.track_output);
         self.emit(Complete(block));
 
         // Vector-scalar add shift amount to bitwise entities' tmp0.
         // This makes all active shifters greater than or equal to zero.
         let block = make_cmd_block(
             self.selector.clone(), conds.clone(), self.make_op_cmd_xr(
-                self.tgt_bit_all.clone(), tmp0.clone(), PlayerOp::Add, amount));
+                self.tgt_bit_all.clone(), tmp0.clone(), PlayerOp::Add, amount),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -878,7 +905,8 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             self.selector.clone(), conds.clone(), Execute(
                 active_bit_tgt, REL_ZERO,
                 Box::new(self.make_op_cmd_rr(
-                    t0.clone(), PlayerOp::Div, two_reg))));
+                    t0.clone(), PlayerOp::Div, two_reg))),
+            self.track_output);
         self.emit(Complete(block));
     }
 
@@ -1036,7 +1064,10 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 }
 
-fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {
+fn make_cmd_block(
+    selector: Selector, conds: Vec<Cond>, cmd: Command, track_output: bool)
+    -> Block
+{
     let cmd = if conds.is_empty() { cmd } else {
         let mut sel = selector;
         for cond in conds.into_iter() {
@@ -1045,8 +1076,7 @@ fn make_cmd_block(selector: Selector, conds: Vec<Cond>, cmd: Command) -> Block {
 
         Execute(sel.into_target(), types::REL_ZERO, Box::new(cmd))
     };
-    // FIXME: Add a flag to control whether TrackOutput is on or off by default.
-    fab::cmd_block(cmd, true)
+    fab::cmd_block(cmd, track_output)
 }
 
 fn reg_name(reg: Register) -> String {

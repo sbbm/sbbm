@@ -32,6 +32,10 @@ Options:
     -d, --destroy DESTROY  A filename that will be used to write out a list of
                            commands that destroy the blocks and entities created
                            during assembly and initialization.
+    -t, --track-output     When present, command blocks are generated with
+                           TrackOutput enabled, so that the result of previous
+                           executions can be viewed in-game.  (Mainly useful for
+                           debugging.)
 ";
 
 #[derive(Debug, RustcDecodable)]
@@ -45,6 +49,7 @@ struct Args {
     flag_init: Option<String>,
     flag_boot: Option<String>,
     flag_destroy: Option<String>,
+    flag_track_output: bool,
 }
 
 #[derive(RustcDecodable, Debug)]
@@ -86,7 +91,8 @@ fn main() {
         let stmts = parser.parse_program();
 
         // FIXME: Check for warnings/errors before starting to place blocks.
-        let assembler = Assembler::new(&computer, stmts.into_iter());
+        let mut assembler = Assembler::new(&computer, stmts.into_iter());
+        assembler.set_track_output(args.flag_track_output);
         let motion : Box<LayoutMotion> = match args.flag_layout {
             Some(LayoutKind::Linear) => Box::new(LinearMotion::new(origin)),
             Some(LayoutKind::Packed) | None => Box::new(PackedMotion::new(origin)),

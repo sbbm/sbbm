@@ -159,8 +159,9 @@ impl Server {
             marked.push_str(marker);
 
             let mut parser = Parser::new(Lexer::mem(&marked[..]));
-            let assembler = Assembler::new(
+            let mut assembler = Assembler::new(
                 computer(), parser.parse_program().into_iter());
+            assembler.set_track_output(true);
 
             let mem_controllers = {
                 let mut c = vec!();
