@@ -209,17 +209,9 @@ fn mem_ctrl_read(
 
     let clay = "minecraft:stained_hardened_clay".to_string();
     for data in (0..16) {
-        let comps_data_sel = Selector {
-            scores: {
-                let mut s = HashMap::new();
-                s.insert(t0.clone(), Interval::Bounded(data, data));
-                s },
-            ..comps_sel.clone()
-        };
-
         let cmd = players::set(nearest_sel.to_target(), t0.clone(), data, None);
         let cmd = ExecuteDetect(
-            comps_data_sel.into_target(), REL_ZERO,
+            comps_sel.to_target(), REL_ZERO,
             REL_ZERO, clay.clone(), data, Box::new(cmd));
         let block = cmd_block(mem_read_cmd(region, cmd), track_output);
         items.push(Complete(block));

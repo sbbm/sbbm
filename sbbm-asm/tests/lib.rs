@@ -295,20 +295,30 @@ urng r0, r0, #{}, #{}", input, min, max)[..]);
 fn test_ldr_str() {
     let server = Server::new();
 
-    let values = [1, -1, 0xfedcba97, 0xedbca987, 0x12345678, 0];
-    let addrs = [0x10, 0x14, 0x18, 0x10c];
+    let addr_val = [
+        (0x10, 1),
+        (0x14, -1),
+        (0x18, 0xfedcba97),
+        (0x1c, 0x12345678),
+        (0x20, 0),
+        (0x10c, 0xedbca987),
+    ];
 
-    for addr in addrs.iter() {
-        for value in values.iter() {
-            server.run_asm(&format!("
+    for &(addr, value) in addr_val.iter() {
+        server.run_asm(&format!("
 main:
 mov r0, #{}
 mov r1, #{}
-str r0, [r1]
-ldr r1, [r1]", value, addr)[..]);
+str r0, [r1]", value, addr)[..]);
+    }
 
-            assert_eq!(*value, server.get_computer("r1").unwrap());
-        }
+    for &(addr, value) in addr_val.iter() {
+        server.run_asm(&format!("
+main:
+mov r0, #{}
+ldr r1, [r0]", addr)[..]);
+
+        assert_eq!(value, server.get_computer("r1").unwrap());
     }
 }
 

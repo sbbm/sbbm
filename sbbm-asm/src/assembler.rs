@@ -53,7 +53,7 @@ pub struct Assembler<'c, Source : Iterator<Item=Statement>> {
     done: bool,
     unique: u32,
     pending_labels: Vec<String>,
-    label_addrs: Vec<(i32, String)>,
+    next_addr: i32,
     label_addr_map: HashMap<String, i32>,
     team_bit: Team,
     tgt_bit_all: Target,
@@ -92,7 +92,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             done: false,
             unique: 0,
             pending_labels: vec!(),
-            label_addrs: vec![],
+            next_addr: 0,
             label_addr_map: HashMap::new(),
             team_bit: team_bit.to_string(),
             tgt_bit_all: Target::Sel(Selector {
@@ -168,6 +168,7 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
             BrR(reg) => self.emit_br_r(conds, reg),
             BrLnkL(label) => self.emit_br_lnk_l(conds, label),
             BrLnkR(reg) => self.emit_br_lnk_r(conds, reg),
+            Halt => self.emit(Terminal),
             RawCmd(outs, cmd) => {
                 let mut block = make_cmd_block(
                     self.selector.clone(), conds, Raw(cmd), self.track_output);
@@ -180,15 +181,14 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
     }
 
     fn get_label_addr(&mut self, label: &str) -> i32 {
-        match self.label_addr_map.get(label) {
-            Some(addr) => *addr,
-            None => {
-                // Skip zero as an address.
-                let addr = (self.label_addrs.len() + 1) as i32;
-                self.label_addrs.push((addr, label.to_string()));
-                addr
-            }
+        if let Some(addr) = self.label_addr_map.get(label) {
+            return *addr
         }
+
+        // Skip zero as an address.
+        self.next_addr += 1;
+        self.label_addr_map.insert(label.to_string(), self.next_addr);
+        self.next_addr
     }
 
     fn coalesce_label_addrs(&mut self, labels: &Vec<String>) {
@@ -1042,9 +1042,11 @@ impl<'c, S : Iterator<Item=Statement>> Assembler<'c, S> {
         self.emit(Label("@jump_indirect".to_string()));
 
         let ind_addr_reg = Register::Spec("IndAddr".to_string());
-        let mut label_addrs = vec![];
-        mem::swap(&mut label_addrs, &mut self.label_addrs);
-        for (addr, label) in label_addrs.into_iter() {
+        let mut label_addr_map = HashMap::new();
+        mem::swap(&mut label_addr_map, &mut self.label_addr_map);
+        let mut label_addrs: Vec<_> = label_addr_map.into_iter().collect();
+        label_addrs.sort_by(|a, b| a.1.cmp(&b.1));
+        for (label, addr) in label_addrs.into_iter() {
             let conds = vec![Cond::eq(ind_addr_reg.clone(), addr)];
             self.emit_power_label(conds, label);
         }

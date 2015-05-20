@@ -299,7 +299,7 @@ fn classify_register(s: &str) -> Option<Token> {
     } else if PRED_REG_REGEX.is_match(s) {
         let reg = s.to_string();
         Some(PredReg(reg))
-    } else if s == "lr" {
+    } else if s == "lr" || s == "sp" {
         let reg = s.to_string();
         Some(SpecReg(reg))
     } else {
