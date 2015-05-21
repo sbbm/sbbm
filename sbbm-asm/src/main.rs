@@ -112,6 +112,13 @@ fn main() {
                 pos.as_abs(), block.id, None, None,
                 Some(Nbt::Compound(block.nbt)))).unwrap();
         }
+        // FIXME: This is to accommodate the linear layout motion, whose power
+        // blocks are not contained by the extent.  But really, layout motions
+        // should be prepared to be interrogated about the extent.  That way we
+        // don't need to make any assumptions here.
+        if let Some(main_extent) = layout.get_power_extent("main") {
+            extent.union(&main_extent);
+        }
 
         if let Some(init) = args.flag_init {
             let mut f = File::create(Path::new(&init[..])).unwrap();
