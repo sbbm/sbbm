@@ -468,8 +468,20 @@ impl fmt::Display for Command {
 }
 
 pub fn escape(cmd: &str) -> String {
-    // Replace " with \"
-    str::replace(cmd, "\"", "\\\"")
+    let mut out = String::new();
+    for c in cmd.chars() {
+        match c {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '\t' => out.push_str("\t"),
+            '\n' => out.push_str("\n"),
+            '\r' => out.push_str("\r"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[derive(Copy, Clone, Debug)]
