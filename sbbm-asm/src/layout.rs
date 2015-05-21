@@ -64,7 +64,7 @@ impl PackedMotion {
     pub fn new(start: Vec3) -> PackedMotion {
         PackedMotion {
             start: start,
-            pos: Vec3::new(start.x + 1, start.y, start.z),
+            pos: Vec3::new(start.x + 1, start.y + 1, start.z),
             dir: 0,
             level: 0,
         }
