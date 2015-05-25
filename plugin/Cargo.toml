@@ -1,8 +1,0 @@
-[package]
-name = "sbbm_plugin"
-version = "0.0.1"
-authors = ["Christopher Chambers <chris.chambers@peanutcode.com>"]
-
-[lib]
-name = "sbbm_plugin"
-plugin = true

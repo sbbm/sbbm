@@ -1,32 +1,21 @@
-#![feature(asm, core, lang_items, no_std, plugin)]
+#![feature(asm, core, lang_items, no_std)]
 #![no_std]
 #![crate_name = "sbbm"]
 #![crate_type = "rlib"]
-#![plugin(sbbm_plugin)]
 
 extern crate core;
 
 #[macro_use]
 pub mod macros;
+pub mod raw;
 
-#[lang = "stack_exhausted"]
-extern fn stack_exhausted() {}
+mod commands;
+mod predef;
 
-#[lang = "eh_personality"]
-extern fn eh_personality() {}
+pub use commands::*;
+pub use predef::*;
 
-#[lang = "panic_fmt"]
-fn panic_fmt() -> ! { loop {} }
-
-pub trait RawDef {
-    #[inline(always)]
-    unsafe fn emit(&self);
-}
-
-pub trait RawSelector {
-    #[inline(always)]
-    unsafe fn emit_sel(&self);
-}
+use raw::{RawSelector, RawObjective};
 
 pub type SuccessCount = i32;
 
@@ -99,17 +88,24 @@ impl<T> Selector for T where T : RawSelector {
     }
 }
 
-pub trait RawObjective {
-    #[inline(always)]
-    unsafe fn emit_obj(&self);
-    #[inline(always)]
-    unsafe fn emit_crit(&self);
-    #[inline(always)]
-    unsafe fn emit_disp(&self);
-}
-
 pub trait Objective {
+    /// Adds this objective to the scoreboard.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// objective!(Stamina, "dummy");
+    /// Stamina.add();
+    /// ```
     fn add(&self);
+    /// Removes this objective from the scoreboard.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// objective!(Stamina, "dummy");
+    /// Stamina.remove();
+    /// ```
     fn remove(&self);
 }
 
@@ -134,3 +130,12 @@ impl<T> Objective for T where T : RawObjective {
 }
 
 // TODO: trait DisplaySlot
+
+#[lang = "stack_exhausted"]
+extern fn stack_exhausted() { }
+
+#[lang = "eh_personality"]
+extern fn eh_personality() { }
+
+#[lang = "panic_fmt"]
+fn panic_fmt() -> ! { loop { } }

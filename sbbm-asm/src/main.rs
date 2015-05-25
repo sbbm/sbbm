@@ -17,7 +17,9 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-static USAGE : &'static str = "
+static ENTRY_LABEL: &'static str = "_start";
+
+static USAGE: &'static str = "
 usage: sbbm-asm [-l LAYOUT] [-k INIT] [-b BOOT] [-d DESTROY] [-o OUTPUT] <x> <y> <z> <source>
 
 Options:
@@ -116,8 +118,8 @@ fn main() {
         // blocks are not contained by the extent.  But really, layout motions
         // should be prepared to be interrogated about the extent.  That way we
         // don't need to make any assumptions here.
-        if let Some(main_extent) = layout.get_power_extent("main") {
-            extent.union(&main_extent);
+        if let Some(entry_extent) = layout.get_power_extent(ENTRY_LABEL) {
+            extent.union(&entry_extent);
         }
 
         if let Some(init) = args.flag_init {
@@ -146,7 +148,7 @@ fn main() {
 fn boot_computer<Source>(w: &mut Write, layout: &Layout<Source>) -> io::Result<()>
     where Source : Iterator<Item=AssembledItem>
 {
-    if let Some(Extent::MinMax(min, max)) = layout.get_power_extent("main") {
+    if let Some(Extent::MinMax(min, max)) = layout.get_power_extent(ENTRY_LABEL) {
         let cmd = Command::Fill(
             min.as_abs(), max.as_abs(),
             "minecraft:redstone_block".to_string(), None, None, None);
