@@ -174,11 +174,24 @@ macro_rules! make_value {
 /// ```
 #[macro_export]
 macro_rules! selector {
-    ($name:ident, $selector:expr) => {
+    (pub $name:ident, $selector:expr) => {
         #[derive(Copy, Clone)]
         // REVIEW: Is it possible to pass attributes through?
         // allow(dead_code), in particular, would be nice to let
         // people choose for themselves.
+        #[allow(non_camel_case_types)]
+        pub struct $name;
+
+        impl $crate::raw::RawSelector for $name {
+            #[inline(always)]
+            unsafe fn emit_sel(&self) {
+                def_asm!(sel, $selector);
+            }
+        }
+    };
+
+    ($name:ident, $selector:expr) => {
+        #[derive(Copy, Clone)]
         #[allow(non_camel_case_types)]
         struct $name;
 
@@ -208,6 +221,11 @@ macro_rules! selector {
 #[macro_export]
 macro_rules! selectors {
     () => ();
+
+    (pub $name:ident: $selector:expr; $($rest:tt)*) => {
+        selector!(pub $name, $selector);
+        selectors!($($rest)*);
+    };
 
     ($name:ident: $selector:expr; $($rest:tt)*) => {
         selector!($name, $selector);

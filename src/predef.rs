@@ -104,9 +104,9 @@ pub mod enchant {
 #[allow(non_camel_case_types)]
 pub mod selectors {
     selectors! {
-        ALL_PLAYERS: "@a";
-        ALL_ENTITIES: "@e";
-        NEAREST_PLAYER: "@p";
-        RANDOM_PLAYER: "@r";
+        pub ALL_PLAYERS: "@a";
+        pub ALL_ENTITIES: "@e";
+        pub NEAREST_PLAYER: "@p";
+        pub RANDOM_PLAYER: "@r";
     }
 }
