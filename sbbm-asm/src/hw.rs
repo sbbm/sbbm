@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use commands::{
     Command, IntoTarget, Selector, SelectorName, SelectorTeam, Target, ToTarget,
     self, objectives, players, teams};

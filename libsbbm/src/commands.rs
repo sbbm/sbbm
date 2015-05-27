@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use raw::*;
 
 // TODO: Think about how 'execute' should be exposed.  'particles', for example,

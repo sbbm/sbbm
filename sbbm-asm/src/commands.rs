@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use types::{Extent, Interval, Pos3, Vec3};
 use nbt::Nbt;
 use std::collections::HashMap;

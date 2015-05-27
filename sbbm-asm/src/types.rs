@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use nbt::NbtCompound;
 use std::cmp::{min, max};
 use std::fmt;

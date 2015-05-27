@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 extern crate docopt;
 extern crate rustc_serialize;
 extern crate sbbm_asm;

@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use assembler::{AssembledItem, PendingFn};
 use assembler::AssembledItem::*;
 use types::{Block, Extent, Vec3};

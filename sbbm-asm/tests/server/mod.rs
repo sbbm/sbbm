@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 use regex::Regex;
 use sbbm_asm::assembler::Assembler;
 use sbbm_asm::commands::{Command, Target, IntoTarget, players};

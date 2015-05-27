@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 // WHEN(rust-1.0): Remove std_misc (it is here for StaticMutex and MUTEX_INIT)
 #![feature(plugin, std_misc)]
 #![plugin(regex_macros)]

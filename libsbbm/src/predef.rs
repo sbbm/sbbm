@@ -1,3 +1,6 @@
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
+
 macro_rules! make {
     ($name:ident, $value:expr) => {
         make_value!(pub $name, $value);

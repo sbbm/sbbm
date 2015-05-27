@@ -1,5 +1,7 @@
-/// Prepares the execution environment and then hands off execution to
+// Copyright 2015, Christopher Chambers
+// Distributed under the GNU GPL v3. See COPYING for details.
 
+/// Prepares the execution environment and then hands off execution to
 /// the passed entry function.
 ///
 /// This macro should be called exactly once with the name of your 'main'
